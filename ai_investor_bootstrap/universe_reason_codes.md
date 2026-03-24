@@ -22,12 +22,31 @@
 3. **一条规则对应一个主要 code**：不要把多个不同逻辑揉成一个码。  
 4. **允许多码并存**：同一只股票可以同时命中多个纳入或排除原因。  
 5. **reason code 进入 audit**：每次输出都应记录命中的原因码集合。  
+6. **`inclusion_reasons` 语义约定**：`universe_membership.inclusion_reasons` 只放**来源码**（如 `INC_FULL_MARKET_SEED`、`INC_USER_WATCHLIST`）和**决定性通过码**（如 `INC_BOARD_ALLOWED`、`INC_LIQUIDITY_PASS`）；完整的命中集合（包括所有通过的细粒度码）进入 `audit.applied_reason_codes`。这样用户侧看到的是简洁的纳入原因，而审计侧保有完整轨迹。
 
 ### 1.3 推荐存储位置
 
 - universe builder 输出：`inclusion_reasons`, `exclusion_reasons`
 - score result 输出：`state_reason_codes`, `audit.applied_reason_codes`
 - audit log：完整保存 `applied_reason_codes`
+
+### 1.4 生命周期管理
+
+原因码一旦上线，不得复用、不得修改语义。如业务规则变更，应新增 code 并废弃旧 code。
+
+每个 code 应在机器可读注册表（`universe_reason_codes.yaml`）中包含以下字段：
+
+| 字段 | 说明 |
+|------|------|
+| `status` | `active` 或 `deprecated` |
+| `introduced_in` | 引入时的 strategy_version |
+| `deprecated_in` | 废弃时的 strategy_version（可空） |
+| `replaced_by` | 替代 code（可空） |
+
+规则：
+1. 新输出不得产生 `deprecated` 状态的 code。
+2. 历史快照中包含 deprecated code 仍可解析。
+3. 如有 `replaced_by`，必须指向一个 `active` code。
 
 ---
 
@@ -102,6 +121,18 @@
 ## 6. 附录：风险叠加码（RISK）
 
 这些码不属于 universe 纳入/排除本身，但会在评分阶段形成扣分，并进入 `score_result.penalties[*].code`。
+
+### 二级前缀命名约定
+
+新增风险码应遵循以下二级前缀，现有 5 个码为首版命名，暂不改名：
+
+| 前缀 | 分类 | 示例 |
+|------|------|------|
+| `RISK_FIN_*` | 财务风险（商誉、质押等） | `RISK_FIN_HIGH_LEVERAGE` |
+| `RISK_GOV_*` | 公司治理风险 | `RISK_GOV_BOARD_CONFLICT` |
+| `RISK_REG_*` | 监管/合规风险 | `RISK_REG_PENALTY` |
+| `RISK_EVT_*` | 事件驱动风险（减持、诉讼等） | `RISK_EVT_LAWSUIT` |
+| `RISK_MKT_*` | 市场结构风险 | `RISK_MKT_CONCENTRATION` |
 
 | code | 中文含义 | 示例触发条件 | 默认扣分 |
 |---|---|---|---:|

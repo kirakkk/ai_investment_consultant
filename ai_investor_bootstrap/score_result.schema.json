@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://local.ai-investor/schema/score_result.schema.json",
+  "$id": "https://local.ai-investor/schema/score_result.v2.schema.json",
   "title": "A股研究结果输出协议",
   "description": "用于约束单个标的在研究层（R0）的结构化输出。",
   "type": "object",
@@ -18,8 +18,12 @@
     "security",
     "universe_membership",
     "result_state",
+    "state_reason_codes",
     "total_score",
+    "rank",
+    "percentile_rank",
     "sub_scores",
+    "penalties",
     "label",
     "confidence",
     "drivers",
@@ -159,10 +163,10 @@
       "description": "用户可见研究标签。"
     },
     "total_score": {
-      "type": "number",
+      "type": ["number", "null"],
       "minimum": 0,
       "maximum": 100,
-      "description": "最终总分，范围为 0~100。"
+      "description": "最终总分。计分公式：total_score = clamp(sum(sub_scores) + sum(penalties.score_impact), 0, 100)。当 result_state=blocked 时为 null。"
     },
     "rank": {
       "type": ["integer", "null"],
@@ -392,7 +396,8 @@
       "properties": {
         "code": {
           "type": "string",
-          "description": "驱动项编码。"
+          "pattern": "^DRV_[A-Z0-9_]+$",
+          "description": "驱动项编码，前缀 DRV_。"
         },
         "title": {
           "type": "string",
@@ -434,7 +439,8 @@
       "properties": {
         "code": {
           "type": "string",
-          "description": "风险项编码。"
+          "pattern": "^RISK_[A-Z0-9_]+$",
+          "description": "风险披露项编码，前缀 RISK_。"
         },
         "title": {
           "type": "string",
@@ -464,7 +470,8 @@
       "properties": {
         "code": {
           "type": "string",
-          "description": "触发器编码。"
+          "pattern": "^(TRG|INV)_[A-Z0-9_]+$",
+          "description": "触发器/失效条件编码，前缀 TRG_（触发器）或 INV_（失效条件）。"
         },
         "title": {
           "type": "string",

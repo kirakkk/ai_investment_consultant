@@ -1,0 +1,355 @@
+# universe_reason_codes.yaml
+# 机器可读原因码注册表。覆盖 INC/CND/EXC/DGD/BLK/RISK 六个 code family。
+# 人类可读说明文档见 universe_reason_codes.md。
+#
+# 生命周期规则：
+#   - code 一旦上线不得复用
+#   - 废弃时设 status: deprecated，填 deprecated_in 和 replaced_by
+#   - 新输出不得产生 deprecated code
+
+schema_version: "1.0.0"
+strategy_version_introduced: "0.1.0"
+
+codes:
+
+  # ──────────────── 纳入原因码 (INC / CND) ────────────────
+
+  - code: INC_FULL_MARKET_SEED
+    category: inclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "来自全市场基础股票池"
+    trigger_rule: "当日基础 universe 生成时纳入"
+    note: "最基础的 seed"
+
+  - code: INC_USER_WATCHLIST
+    category: inclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "来自用户观察池"
+    trigger_rule: "用户显式加入观察列表"
+
+  - code: INC_THEME_SLICE
+    category: inclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "来自主题切片"
+    trigger_rule: "命中主题映射后的候选池"
+    note: "例如：算力、机器人"
+
+  - code: CND_SIGNAL_CANDIDATE
+    category: candidate
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "来自外部关注信号"
+    trigger_rule: "由新闻/舆情/政策热度推入候选队列"
+    note: "首版不直接提升主分"
+
+  - code: INC_SECURITY_TYPE_COMMON_STOCK
+    category: inclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "证券类型通过"
+    trigger_rule: "证券类型为普通 A 股"
+
+  - code: INC_BOARD_ALLOWED
+    category: inclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "板块通过"
+    trigger_rule: "板块属于允许范围（main / chinext）"
+
+  - code: INC_LISTED_DAYS_PASS
+    category: inclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "上市时间通过"
+    trigger_rule: "上市交易日数 >= 最小阈值"
+
+  - code: INC_LIQUIDITY_PASS
+    category: inclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "流动性通过"
+    trigger_rule: "ADV20 成交额 >= 最小阈值（首版 1 亿元）"
+
+  - code: INC_FINANCIALS_READY
+    category: inclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "财务数据齐备"
+    trigger_rule: "最新财报关键字段齐全"
+
+  - code: INC_AUDIT_PASS
+    category: inclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "审计意见通过"
+    trigger_rule: "最新审计意见为标准无保留"
+
+  - code: INC_POSITIVE_EQUITY_PASS
+    category: inclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "净资产通过"
+    trigger_rule: "净资产为正"
+
+  # ──────────────── 排除原因码 (EXC) ────────────────
+
+  - code: EXC_NOT_COMMON_STOCK
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "非普通 A 股"
+    trigger_rule: "证券类型不为 common_stock"
+    hard_exclude: true
+
+  - code: EXC_BOARD_NOT_ALLOWED
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "板块不在允许范围"
+    trigger_rule: "不属于 main / chinext"
+    hard_exclude: true
+
+  - code: EXC_ETF
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "ETF 被排除"
+    trigger_rule: "证券类型为 ETF"
+    hard_exclude: true
+
+  - code: EXC_REIT
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "REIT 被排除"
+    trigger_rule: "证券类型为 REIT"
+    hard_exclude: true
+
+  - code: EXC_B_SHARE
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "B 股被排除"
+    trigger_rule: "证券类型为 B 股"
+    hard_exclude: true
+
+  - code: EXC_BOND_LIKE
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "债性品种被排除"
+    trigger_rule: "可转债/债券类"
+    hard_exclude: true
+
+  - code: EXC_ST_OR_RISK_WARNING
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "ST / 风险警示被排除"
+    trigger_rule: "命中 ST、*ST 或风险警示标签"
+    hard_exclude: true
+
+  - code: EXC_DELISTING_PHASE
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "退市整理期被排除"
+    trigger_rule: "证券处于退市整理阶段"
+    hard_exclude: true
+
+  - code: EXC_SUSPENDED
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "停牌被排除"
+    trigger_rule: "当日不可正常交易"
+    hard_exclude: true
+
+  - code: EXC_LISTED_DAYS_LT_60
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "上市未满 60 个交易日"
+    trigger_rule: "上市交易日数 < 60"
+    hard_exclude: true
+
+  - code: EXC_ADV20_AMOUNT_LT_100M
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "流动性不足"
+    trigger_rule: "20 日平均成交额 < 1 亿元"
+    hard_exclude: true
+
+  - code: EXC_NEGATIVE_EQUITY
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "净资产为负"
+    trigger_rule: "最新净资产 < 0"
+    hard_exclude: true
+
+  - code: EXC_MISSING_LATEST_FINANCIALS
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "最新财务不齐"
+    trigger_rule: "关键财务字段缺失"
+    hard_exclude: true
+
+  - code: EXC_AUDIT_NON_STANDARD
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "审计意见不达标"
+    trigger_rule: "非标准无保留意见"
+    hard_exclude: true
+
+  - code: EXC_POLICY_RESTRICTED
+    category: exclusion
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "策略政策限制"
+    trigger_rule: "因策略或业务限制不允许研究"
+    hard_exclude: true
+
+  # ──────────────── 降级原因码 (DGD) ────────────────
+
+  - code: DGD_MISSING_NONCRITICAL_FEATURES
+    category: degraded
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "缺失非关键特征"
+    trigger_rule: "非关键字段缺失，但关键字段完整"
+    default_action: "输出结果，降低 confidence"
+
+  - code: DGD_STALE_ATTENTION_SOURCE
+    category: degraded
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "关注信号过期"
+    trigger_rule: "attention 层数据超时"
+    default_action: "仅影响 attention/risk flag"
+
+  - code: DGD_PARTIAL_VALUATION_FALLBACK
+    category: degraded
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "估值指标部分回退"
+    trigger_rule: "PE/PB/EV/EBITDA 中部分指标不可用"
+    default_action: "允许输出，记录回退"
+
+  - code: DGD_PARTIAL_INDUSTRY_MAPPING
+    category: degraded
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "行业映射不完整"
+    trigger_rule: "行业层级缺失，退化到更粗粒度分组"
+    default_action: "允许输出，降低可比性"
+
+  - code: DGD_PARTIAL_MARKET_CONFIRMATION
+    category: degraded
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "市场确认项部分缺失"
+    trigger_rule: "技术面某些指标不可用"
+    default_action: "允许输出，降低置信度"
+
+  # ──────────────── 阻断原因码 (BLK) ────────────────
+
+  - code: BLK_MISSING_CRITICAL_INPUTS
+    category: blocked
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "缺失关键输入"
+    trigger_rule: "关键特征或关键快照缺失"
+    user_facing: "当前无法形成稳定结论"
+
+  - code: BLK_POLICY_DISALLOWED
+    category: blocked
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "策略/政策不允许"
+    trigger_rule: "命中合规、业务、权限限制"
+    user_facing: "当前不提供该类研究结论"
+
+  - code: BLK_UNIVERSE_EXCLUDED
+    category: blocked
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "已被股票池排除"
+    trigger_rule: "命中任何硬排除逻辑"
+    user_facing: "当前不在可研究股票池"
+
+  - code: BLK_DATA_CONTRACT_BROKEN
+    category: blocked
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "数据契约不完整"
+    trigger_rule: "PIT 必要字段缺失或 source_hash 无法确认"
+    user_facing: "数据证据不足"
+
+  - code: BLK_AUDIT_TRAIL_MISSING
+    category: blocked
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "审计链不完整"
+    trigger_rule: "无法写入 audit log 或缺少关键版本号"
+    user_facing: "结果不可审计，已阻断"
+
+  # ──────────────── 风险叠加码 (RISK) ────────────────
+  # 二级前缀约定（新增码应遵循）：
+  #   RISK_FIN_*  — 财务风险（商誉、质押等）
+  #   RISK_GOV_*  — 公司治理风险
+  #   RISK_REG_*  — 监管/合规风险
+  #   RISK_EVT_*  — 事件驱动风险（减持、诉讼等）
+  #   RISK_MKT_*  — 市场结构风险
+  # 现有 5 个码为首版命名，暂不改名，新增码遵循二级前缀。
+
+  - code: RISK_GOODWILL_HIGH
+    category: risk_overlay
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "商誉占比高"
+    trigger_rule: "商誉/净资产超过阈值"
+    default_penalty: -5
+    future_prefix: RISK_FIN_
+
+  - code: RISK_EQUITY_PLEDGE_HIGH
+    category: risk_overlay
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "股权质押比例高"
+    trigger_rule: "主要股东质押比例超过阈值"
+    default_penalty: -5
+    future_prefix: RISK_FIN_
+
+  - code: RISK_REGULATORY_PROBE
+    category: risk_overlay
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "监管立案或调查"
+    trigger_rule: "命中监管调查、立案等公告"
+    default_penalty: -8
+    future_prefix: RISK_REG_
+
+  - code: RISK_MAJOR_REDUCTION
+    category: risk_overlay
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "重要股东减持压力"
+    trigger_rule: "命中重大减持计划或实施"
+    default_penalty: -3
+    future_prefix: RISK_EVT_
+
+  - code: RISK_MATERIAL_NEGATIVE_ANNOUNCEMENT
+    category: risk_overlay
+    status: active
+    introduced_in: "0.1.0"
+    display_name: "重大负面公告"
+    trigger_rule: "诉讼、业绩爆雷、内控缺陷等"
+    default_penalty: -8
+    future_prefix: RISK_EVT_

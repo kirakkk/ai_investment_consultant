@@ -1,0 +1,60 @@
+# data_freshness_profiles.yaml
+# 数据层时效 SLA 定义。策略通过 data_freshness_profile_ref 引用对应 profile。
+# 超时行为：degrade = 降级输出，block = 阻断输出。
+
+profiles:
+  ashare_r0_daily_v1:
+    display_name: "A股 R0 日频研究 v1"
+    description: "面向盘后日频研究场景的默认时效 profile。"
+
+    truth_sources:
+      # 财报、审计报告、公告等法定披露
+      financial_statements:
+        max_stale_calendar_days: 120        # 季报窗口：上一季结束后 ~4 个月
+        on_stale: block
+        block_reason_code: BLK_DATA_CONTRACT_BROKEN
+        note: "超过 120 天未见新季报，视为关键数据缺失。"
+      announcements:
+        max_stale_calendar_days: 3
+        on_stale: degrade
+        degrade_reason_code: DGD_STALE_ATTENTION_SOURCE
+        note: "公告 3 天未更新不阻断，但降级标记。"
+      audit_opinion:
+        max_stale_calendar_days: 365
+        on_stale: block
+        block_reason_code: BLK_DATA_CONTRACT_BROKEN
+        note: "审计意见一年一更，超期视为关键缺失。"
+
+    structured_sources:
+      # 行情、估值、行业分类等结构化市场数据
+      daily_market_data:
+        max_stale_trading_days: 1
+        on_stale: block
+        block_reason_code: BLK_DATA_CONTRACT_BROKEN
+        note: "行情数据超过 1 个交易日未更新即阻断。"
+      valuation_reference:
+        max_stale_trading_days: 3
+        on_stale: degrade
+        degrade_reason_code: DGD_PARTIAL_VALUATION_FALLBACK
+        note: "估值参考数据允许 3 个交易日延迟，降级处理。"
+      industry_classification:
+        max_stale_calendar_days: 90
+        on_stale: degrade
+        degrade_reason_code: DGD_PARTIAL_INDUSTRY_MAPPING
+        note: "行业分类季度级更新，超期降级。"
+
+    attention_sources:
+      # 新闻、舆情、政策热度等非真值源
+      media_news:
+        max_stale_hours: 48
+        on_stale: degrade
+        degrade_reason_code: DGD_STALE_ATTENTION_SOURCE
+        note: "新闻超 48 小时标记为过期。"
+      policy_heat:
+        max_stale_hours: 72
+        on_stale: degrade
+        degrade_reason_code: DGD_STALE_ATTENTION_SOURCE
+      social_buzz:
+        max_stale_hours: 24
+        on_stale: degrade
+        degrade_reason_code: DGD_STALE_ATTENTION_SOURCE

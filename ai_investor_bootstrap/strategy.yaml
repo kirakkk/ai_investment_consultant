@@ -6,14 +6,16 @@ owner: "research-platform"
 status: draft
 mode: research_only
 timezone: Asia/Shanghai
-reason_code_registry_ref: "./universe_reason_codes.md"
+reason_code_registry_ref: "./universe_reason_codes.yaml"
+data_freshness_profile_ref: ashare_r0_daily_v1
 
 schedule:
   run_windows:
     - post_close_daily
     - weekly_validation
   asof_rule: trading_day_close
-  rebalance: weekly
+  # research_refresh: 研究结论的刷新节奏（区别于 validation.backtest.rebalance 回测换仓节奏）
+  research_refresh: weekly
 
 market:
   exchanges:
@@ -176,6 +178,10 @@ risk_overlays:
     - code: RISK_MATERIAL_NEGATIVE_ANNOUNCEMENT
       penalty: 8
 
+# attention_overlay 设计意图：
+# attention 层（新闻/舆情/政策热度）属于非真值源，首版不进入 R0 主评分正向 alpha。
+# positive_alpha_weight: 0 表示 attention 信号仅产出 attention_queue 和 risk_flag，
+# 用于辅助观察和风险标记，不直接影响 total_score。
 attention_overlay:
   enabled: true
   positive_alpha_weight: 0
@@ -214,8 +220,12 @@ output_contract:
     - security
     - universe_membership
     - result_state
-    - total_score
+    - state_reason_codes     # v0.1.0 新增：ok 时为 []，degraded/blocked 时非空
+    - total_score             # v0.1.0 变更：blocked 时为 null
+    - rank                    # v0.1.0 新增：nullable
+    - percentile_rank         # v0.1.0 新增：nullable
     - sub_scores
+    - penalties               # v0.1.0 新增：无扣分时为 []
     - label
     - confidence
     - drivers
