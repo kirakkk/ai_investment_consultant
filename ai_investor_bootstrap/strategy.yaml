@@ -1,0 +1,278 @@
+strategy_id: ashare_quality_cashflow_regime_v1
+strategy_version: 0.1.0
+display_name: "A股质量-现金流-景气 v1"
+description: "面向A股研究场景的确定性评分策略模板，优先用于研究层（R0）输出。"
+owner: "research-platform"
+status: draft
+mode: research_only
+timezone: Asia/Shanghai
+reason_code_registry_ref: "./universe_reason_codes.md"
+
+schedule:
+  run_windows:
+    - post_close_daily
+    - weekly_validation
+  asof_rule: trading_day_close
+  rebalance: weekly
+
+market:
+  exchanges:
+    - SSE
+    - SZSE
+  boards:
+    - main
+    - chinext
+  security_types:
+    - common_stock
+  currency: CNY
+
+universe:
+  include_seeds:
+    - code: INC_FULL_MARKET_SEED
+      enabled: true
+    - code: INC_USER_WATCHLIST
+      enabled: true
+    - code: INC_THEME_SLICE
+      enabled: true
+    - code: INC_SIGNAL_CANDIDATE
+      enabled: false
+  hard_exclusions:
+    - EXC_NOT_COMMON_STOCK
+    - EXC_ETF
+    - EXC_REIT
+    - EXC_B_SHARE
+    - EXC_BOND_LIKE
+    - EXC_ST_OR_RISK_WARNING
+    - EXC_DELISTING_PHASE
+    - EXC_SUSPENDED
+    - EXC_BOARD_NOT_ALLOWED
+  eligibility_rules:
+    min_listed_trading_days: 60
+    min_adv20_amount_cny: 100000000
+    require_positive_equity: true
+    require_latest_financials: true
+    require_standard_unqualified_audit: true
+  versioning:
+    policy: daily_snapshot
+    key_fields:
+      - asof
+      - market.exchanges
+      - market.boards
+      - universe.include_seeds
+      - universe.hard_exclusions
+      - universe.eligibility_rules
+
+# 这一层描述“数据必须长什么样”，而不是“用什么 SDK 去抓”。
+data_contract:
+  truth_sources:
+    - exchange_announcements
+    - statutory_filings
+    - official_market_data
+  structured_sources:
+    - valuation_reference
+    - industry_classification
+  attention_sources:
+    - media_news
+    - policy_heat
+    - social_buzz
+  pit_required_fields:
+    - published_at
+    - available_at
+    - retrieved_at
+    - asof
+    - source_name
+    - source_hash
+    - parser_version
+
+feature_pipeline:
+  normalization:
+    peer_group:
+      - board
+      - industry_l1
+    winsorize_pct: [0.02, 0.98]
+    zscore_clip: 3.0
+  missing_data_policy:
+    critical_fields_block: true
+    noncritical_fields_degrade: true
+  feature_groups:
+    profitability_quality:
+      weight: 25
+      metrics:
+        - id: roe_ttm
+          direction: higher_better
+          critical: true
+        - id: gross_margin_stability_12q
+          direction: higher_better
+          critical: false
+        - id: asset_turnover_delta
+          direction: higher_better
+          critical: false
+    cashflow_balance_sheet:
+      weight: 20
+      metrics:
+        - id: cfo_to_net_profit_ttm
+          direction: higher_better
+          critical: true
+        - id: fcf_ttm_margin
+          direction: higher_better
+          critical: false
+        - id: net_debt_to_ebitda
+          direction: lower_better
+          critical: true
+        - id: receivable_inventory_anomaly
+          direction: lower_better
+          critical: false
+    growth_regime:
+      weight: 20
+      metrics:
+        - id: revenue_yoy_acceleration
+          direction: higher_better
+          critical: false
+        - id: profit_yoy_acceleration
+          direction: higher_better
+          critical: false
+        - id: operating_margin_delta
+          direction: higher_better
+          critical: false
+        - id: industry_regime_strength
+          direction: higher_better
+          critical: false
+    valuation_sanity:
+      weight: 15
+      metrics:
+        - id: pe_pctile_in_industry
+          direction: lower_better
+          critical: false
+        - id: pb_pctile_in_industry
+          direction: lower_better
+          critical: false
+        - id: ev_ebitda_pctile_in_industry
+          direction: lower_better
+          critical: false
+    market_confirmation:
+      weight: 20
+      metrics:
+        - id: rs_60d
+          direction: higher_better
+          critical: false
+        - id: ma_structure
+          direction: higher_better
+          critical: false
+        - id: turnover_support
+          direction: higher_better
+          critical: false
+
+risk_overlays:
+  max_penalty_points: 20
+  items:
+    - code: RISK_GOODWILL_HIGH
+      penalty: 5
+    - code: RISK_EQUITY_PLEDGE_HIGH
+      penalty: 5
+    - code: RISK_REGULATORY_PROBE
+      penalty: 8
+    - code: RISK_MAJOR_REDUCTION
+      penalty: 3
+    - code: RISK_MATERIAL_NEGATIVE_ANNOUNCEMENT
+      penalty: 8
+
+attention_overlay:
+  enabled: true
+  positive_alpha_weight: 0
+  outputs:
+    - attention_queue
+    - risk_flag
+
+label_mapping:
+  score_bands:
+    - min: 80
+      max: 100
+      label: 重点研究
+    - min: 65
+      max: 79.9999
+      label: 继续跟踪
+    - min: 45
+      max: 64.9999
+      label: 暂不优先
+    - min: 0
+      max: 44.9999
+      label: 回避
+  blocked_label: 回避
+
+output_contract:
+  schema_ref: "./score_result.schema.json"
+  required_fields:
+    - request_id
+    - run_id
+    - asof
+    - strategy_id
+    - strategy_version
+    - universe_version
+    - data_version
+    - feature_version
+    - policy_version
+    - security
+    - universe_membership
+    - result_state
+    - total_score
+    - sub_scores
+    - label
+    - confidence
+    - drivers
+    - risks
+    - triggers
+    - invalidation
+    - data_quality
+    - audit
+  allowed_tiers:
+    - R0
+  disclaimer_id: CN_R0_RESEARCH_ONLY_V1
+
+policy:
+  result_states:
+    - ok
+    - degraded
+    - blocked
+  degraded_reason_codes:
+    - DGD_MISSING_NONCRITICAL_FEATURES
+    - DGD_STALE_ATTENTION_SOURCE
+    - DGD_PARTIAL_VALUATION_FALLBACK
+  block_reason_codes:
+    - BLK_MISSING_CRITICAL_INPUTS
+    - BLK_POLICY_DISALLOWED
+    - BLK_UNIVERSE_EXCLUDED
+  banned_output_actions:
+    - guaranteed_return
+    - auto_trade
+    - discretionary_order
+    - personalized_profit_commitment
+
+validation:
+  backtest:
+    rebalance: weekly
+    evaluation_horizons_days:
+      - 20
+      - 60
+    benchmarks:
+      - CSI300
+      - CSI500
+  promotion_gate:
+    require_positive_top_quintile_spread: true
+    require_rank_ic_positive_ratio_gte: 0.55
+    require_turnover_within_limit: true
+    max_single_industry_weight: 0.35
+
+audit:
+  log_required: true
+  audit_keys:
+    - request_id
+    - run_id
+    - asof
+    - strategy_id
+    - strategy_version
+    - universe_version
+    - data_version
+    - feature_version
+    - policy_version
+    - source_hashes
+    - applied_reason_codes

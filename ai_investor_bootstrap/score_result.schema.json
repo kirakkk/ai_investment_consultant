@@ -1,0 +1,522 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.ai-investor/schema/score_result.schema.json",
+  "title": "A股研究结果输出协议",
+  "description": "用于约束单个标的在研究层（R0）的结构化输出。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "run_id",
+    "asof",
+    "strategy_id",
+    "strategy_version",
+    "universe_version",
+    "data_version",
+    "feature_version",
+    "policy_version",
+    "security",
+    "universe_membership",
+    "result_state",
+    "total_score",
+    "sub_scores",
+    "label",
+    "confidence",
+    "drivers",
+    "risks",
+    "triggers",
+    "invalidation",
+    "data_quality",
+    "audit"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "description": "一次外部请求的唯一标识。"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "一次研究引擎运行的唯一标识。"
+    },
+    "asof": {
+      "type": "string",
+      "format": "date-time",
+      "description": "本次研究结论所依据的时间点。"
+    },
+    "strategy_id": {
+      "type": "string",
+      "description": "策略唯一标识，应与 strategy.yaml 对齐。"
+    },
+    "strategy_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "策略版本号。"
+    },
+    "universe_version": {
+      "type": "string",
+      "description": "股票池版本号。"
+    },
+    "data_version": {
+      "type": "string",
+      "description": "底层数据快照版本号。"
+    },
+    "feature_version": {
+      "type": "string",
+      "description": "特征工程版本号。"
+    },
+    "policy_version": {
+      "type": "string",
+      "description": "策略/合规模块版本号。"
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ticker",
+        "exchange",
+        "name",
+        "board",
+        "security_type",
+        "industry_l1"
+      ],
+      "properties": {
+        "ticker": {
+          "type": "string",
+          "description": "证券代码，例如 600519。"
+        },
+        "exchange": {
+          "type": "string",
+          "enum": ["SSE", "SZSE"],
+          "description": "交易所。"
+        },
+        "name": {
+          "type": "string",
+          "description": "证券简称。"
+        },
+        "board": {
+          "type": "string",
+          "enum": ["main", "chinext", "star", "other"],
+          "description": "板块。"
+        },
+        "security_type": {
+          "type": "string",
+          "enum": ["common_stock", "etf", "reit", "bond_like", "b_share", "other"],
+          "description": "证券类型。"
+        },
+        "industry_l1": {
+          "type": "string",
+          "description": "一级行业。"
+        },
+        "industry_l2": {
+          "type": ["string", "null"],
+          "description": "二级行业。"
+        }
+      }
+    },
+    "universe_membership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["included", "inclusion_reasons", "exclusion_reasons"],
+      "properties": {
+        "included": {
+          "type": "boolean",
+          "description": "是否属于本次可研究股票池。"
+        },
+        "inclusion_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(INC|CND)_[A-Z0-9_]+$"
+          },
+          "description": "纳入原因码。"
+        },
+        "exclusion_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^EXC_[A-Z0-9_]+$"
+          },
+          "description": "排除原因码。"
+        }
+      }
+    },
+    "result_state": {
+      "type": "string",
+      "enum": ["ok", "degraded", "blocked"],
+      "description": "结果状态。"
+    },
+    "state_reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(DGD|BLK)_[A-Z0-9_]+$"
+      },
+      "description": "状态原因码，例：降级或阻断。"
+    },
+    "label": {
+      "type": "string",
+      "enum": ["重点研究", "继续跟踪", "暂不优先", "回避"],
+      "description": "用户可见研究标签。"
+    },
+    "total_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "最终总分，范围为 0~100。"
+    },
+    "rank": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "在当期 universe 内的排序名次；若不在 universe 内可为空。"
+    },
+    "percentile_rank": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "在当期 universe 内的分位排序；若不在 universe 内可为空。"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "结论置信度，更多反映数据完整性与一致性，不直接等同于未来收益概率。"
+    },
+    "sub_scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profitability_quality",
+        "cashflow_balance_sheet",
+        "growth_regime",
+        "valuation_sanity",
+        "market_confirmation",
+        "risk_penalty"
+      ],
+      "properties": {
+        "profitability_quality": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 25
+        },
+        "cashflow_balance_sheet": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "growth_regime": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "valuation_sanity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "market_confirmation": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "risk_penalty": {
+          "type": "number",
+          "minimum": -20,
+          "maximum": 0
+        }
+      }
+    },
+    "penalties": {
+      "type": "array",
+      "description": "风险叠加项及对应扣分。",
+      "items": {
+        "$ref": "#/$defs/penaltyItem"
+      }
+    },
+    "drivers": {
+      "type": "array",
+      "description": "驱动本次结论的主要正向证据。",
+      "items": {
+        "$ref": "#/$defs/thesisItem"
+      }
+    },
+    "risks": {
+      "type": "array",
+      "description": "本次结论必须披露的主要风险。",
+      "items": {
+        "$ref": "#/$defs/riskItem"
+      }
+    },
+    "triggers": {
+      "type": "array",
+      "description": "后续继续跟踪的触发器。",
+      "items": {
+        "$ref": "#/$defs/triggerItem"
+      }
+    },
+    "invalidation": {
+      "type": "array",
+      "description": "使当前研究结论失效的条件。",
+      "items": {
+        "$ref": "#/$defs/triggerItem"
+      }
+    },
+    "data_quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["critical_complete", "missing_features", "stale_sources", "degraded_reasons"],
+      "properties": {
+        "critical_complete": {
+          "type": "boolean",
+          "description": "关键字段是否齐全。"
+        },
+        "missing_features": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "缺失的特征字段列表。"
+        },
+        "stale_sources": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "超过可接受时效窗口的数据源列表。"
+        },
+        "degraded_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^DGD_[A-Z0-9_]+$"
+          },
+          "description": "降级原因码。"
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "render_tier",
+        "disclaimer_id",
+        "policy_passed",
+        "banned_terms_checked",
+        "source_hashes",
+        "applied_reason_codes"
+      ],
+      "properties": {
+        "render_tier": {
+          "type": "string",
+          "enum": ["R0", "R1", "R2"],
+          "description": "对外呈现层级。首版应固定为 R0。"
+        },
+        "disclaimer_id": {
+          "type": "string",
+          "description": "免责声明模板编号。"
+        },
+        "policy_passed": {
+          "type": "boolean",
+          "description": "是否通过策略与合规校验。"
+        },
+        "banned_terms_checked": {
+          "type": "boolean",
+          "description": "是否完成禁用表述检查。"
+        },
+        "source_hashes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "本次结论涉及的关键数据快照 hash。"
+        },
+        "applied_reason_codes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "本次运行实际命中的原因码全集。"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_name", "source_type", "asof", "source_hash"],
+      "properties": {
+        "source_name": {
+          "type": "string",
+          "description": "数据源名称。"
+        },
+        "source_type": {
+          "type": "string",
+          "enum": ["truth", "structured", "attention"],
+          "description": "数据源层级。"
+        },
+        "asof": {
+          "type": "string",
+          "format": "date-time",
+          "description": "该数据源在本次使用时的 asof。"
+        },
+        "source_hash": {
+          "type": "string",
+          "description": "该数据源快照的 hash。"
+        }
+      }
+    },
+    "penaltyItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "score_impact", "detail"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^RISK_[A-Z0-9_]+$",
+          "description": "风险叠加码。"
+        },
+        "score_impact": {
+          "type": "number",
+          "minimum": -20,
+          "maximum": 0,
+          "description": "对总分的扣分影响。"
+        },
+        "detail": {
+          "type": "string",
+          "description": "扣分原因说明。"
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sourceRef"
+          }
+        }
+      }
+    },
+    "thesisItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "title", "detail"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "驱动项编码。"
+        },
+        "title": {
+          "type": "string",
+          "description": "驱动项标题。"
+        },
+        "detail": {
+          "type": "string",
+          "description": "驱动项详细说明。"
+        },
+        "metric_id": {
+          "type": ["string", "null"],
+          "description": "对应的特征 ID。"
+        },
+        "raw_value": {
+          "type": ["number", "string", "null"],
+          "description": "原始数值。"
+        },
+        "normalized_value": {
+          "type": ["number", "null"],
+          "description": "归一化后数值。"
+        },
+        "direction": {
+          "type": ["string", "null"],
+          "enum": ["higher_better", "lower_better", null],
+          "description": "该指标的方向性。"
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sourceRef"
+          }
+        }
+      }
+    },
+    "riskItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "title", "detail", "severity"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "风险项编码。"
+        },
+        "title": {
+          "type": "string",
+          "description": "风险标题。"
+        },
+        "detail": {
+          "type": "string",
+          "description": "风险详细说明。"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["low", "medium", "high"],
+          "description": "风险严重程度。"
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sourceRef"
+          }
+        }
+      }
+    },
+    "triggerItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "title", "condition"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "触发器编码。"
+        },
+        "title": {
+          "type": "string",
+          "description": "触发器标题。"
+        },
+        "condition": {
+          "type": "string",
+          "description": "结构化或半结构化触发条件。"
+        },
+        "watch_metric": {
+          "type": ["string", "null"],
+          "description": "对应观察指标。"
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sourceRef"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "result_state": { "const": "blocked" }
+        }
+      },
+      "then": {
+        "required": ["state_reason_codes"],
+        "properties": {
+          "state_reason_codes": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "result_state": { "const": "degraded" }
+        }
+      },
+      "then": {
+        "required": ["state_reason_codes"],
+        "properties": {
+          "state_reason_codes": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}
