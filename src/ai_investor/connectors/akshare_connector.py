@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _THROTTLE_SECONDS = 1.0
-_MAX_RETRIES = 4
+_MAX_RETRIES = 6
 
 
 def _throttled_call(func, *args, **kwargs):
@@ -35,18 +35,22 @@ def _throttled_call(func, *args, **kwargs):
     """
     import random
 
+    # Add random jitter to prevent all threads hitting server at once
+    time.sleep(_THROTTLE_SECONDS + random.uniform(0.1, 1.5))
+
     for attempt in range(_MAX_RETRIES):
-        time.sleep(_THROTTLE_SECONDS)
         try:
             return func(*args, **kwargs)
         except (ConnectionError, OSError, Exception) as e:
             err_str = str(e).lower()
+            # THS drops connections via SSLEOFError or Max retries exceeded
             is_retryable = any(k in err_str for k in [
                 "connection", "timeout", "remote", "reset",
                 "aborted", "disconnected", "timed out",
+                "ssl", "eof", "max retries", "read",
             ])
             if is_retryable and attempt < _MAX_RETRIES - 1:
-                wait = 5.0 * (attempt + 1) + random.uniform(1.0, 3.0)
+                wait = 4.0 * (attempt + 1) + random.uniform(2.0, 5.0)
                 logger.warning(f"  Retry {attempt+1}/{_MAX_RETRIES} after {wait:.1f}s: {e}")
                 time.sleep(wait)
             else:
@@ -181,7 +185,7 @@ class AKShareConnector:
 
         # Batch progress tracking is better for CI/CD
         future_map = {}
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             for ticker in tickers:
                 future_map[executor.submit(worker, ticker)] = ticker
             
