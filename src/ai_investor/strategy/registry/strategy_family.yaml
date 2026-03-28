@@ -45,3 +45,7 @@ shared_rules:
     - board
     - industry_anchor
     - size_bucket
+
+  # 行业浓度上限：任何单一行业在每个标签层级中的占比不超过此值
+  # 超出的标的降级到下一个标签层。防止周期股垄断 Top 池。
+  max_single_industry_pct: 0.25

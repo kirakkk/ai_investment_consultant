@@ -30,6 +30,7 @@ class ScoringResult:
     rank: int | None = None
     percentile_rank: float | None = None
     label: str = ""
+    industry: str = ""  # V2: for industry concentration cap
     # V2: coverage metadata
     effective_weight_coverage: float = 1.0
     missing_weight_share: float = 0.0
@@ -93,6 +94,7 @@ def _apply_risk_overlays(
 def _assign_percentile_labels(
     results: list[ScoringResult],
     config: StrategyConfig,
+    max_industry_pct: float = 0.0,
 ) -> None:
     """Assign labels based on cross-sectional percentile rank.
 
@@ -101,6 +103,10 @@ def _assign_percentile_labels(
       继续跟踪: 0.20   → next 15%
       暂不优先: 0.50   → next 30%
       回避: 1.00       → bottom 50%
+
+    If max_industry_pct > 0, enforces industry concentration cap:
+    any single industry exceeding max_industry_pct of a label tier
+    gets its excess stocks demoted to the next tier.
     """
     pct_map = config.get_label_percentiles()
     if not pct_map:
@@ -110,17 +116,51 @@ def _assign_percentile_labels(
     sorted_labels = sorted(pct_map.items(), key=lambda x: x[1])
 
     n = len(results)
+    # Phase 1: assign raw labels by percentile
     for r in results:
         if r.percentile_rank is None:
             r.label = config.label_mapping.blocked_label
             continue
-        # percentile_rank is 0-based (rank 1 → 0.0, last → ~1.0)
         for label_name, cum_pct in sorted_labels:
             if r.percentile_rank < cum_pct:
                 r.label = label_name
                 break
         else:
             r.label = sorted_labels[-1][0]
+
+    # Phase 2: enforce industry concentration cap
+    if max_industry_pct > 0:
+        import logging
+        logger = logging.getLogger(__name__)
+        # Process each label tier except the last (bottom bucket absorbs overflow)
+        for tier_idx in range(len(sorted_labels) - 1):
+            tier_label = sorted_labels[tier_idx][0]
+            next_label = sorted_labels[tier_idx + 1][0]
+
+            tier_results = [r for r in results if r.label == tier_label]
+            if not tier_results:
+                continue
+
+            tier_size = len(tier_results)
+            max_per_industry = max(1, int(tier_size * max_industry_pct))
+
+            # Count per industry, demote excess (lowest-scored first)
+            from collections import defaultdict
+            industry_count: dict[str, int] = defaultdict(int)
+            # tier_results are already sorted desc by total_score (inherited from parent sort)
+            demoted = []
+            for r in tier_results:
+                ind = r.industry or "unknown"
+                industry_count[ind] += 1
+                if industry_count[ind] > max_per_industry:
+                    r.label = next_label
+                    demoted.append((r.ticker, ind))
+
+            if demoted:
+                logger.info(
+                    f"Industry cap: demoted {len(demoted)} from '{tier_label}' to '{next_label}' "
+                    f"(max {max_per_industry} per industry in {tier_size} slots)"
+                )
 
 
 def score_universe(
@@ -166,6 +206,7 @@ def score_universe(
             penalties=penalties,
             risk_penalty_total=capped_penalty,
             total_score=total_score,
+            industry=str(row.get("industry_anchor", row.get("industry_l1", ""))),
             effective_weight_coverage=round(eff_cov, 4),
             missing_weight_share=round(miss_share, 4),
         ))
@@ -186,7 +227,9 @@ def score_universe(
         # Inject override percentiles if provided
         if label_percentiles:
             config.label_mapping.label_percentiles = label_percentiles
-        _assign_percentile_labels(results, config)
+        # V2: read industry concentration cap from config extra fields
+        max_ind_pct = getattr(config, "max_single_industry_pct", 0.0) or 0.0
+        _assign_percentile_labels(results, config, max_industry_pct=float(max_ind_pct))
     else:
         # Absolute score-band labels (V1 default)
         for r in results:
