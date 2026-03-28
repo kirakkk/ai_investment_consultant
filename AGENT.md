@@ -343,6 +343,21 @@ total_score = clamp(
 | **验证阶段** | AKShare connector + 交易所公告 | 1 个可替换行情/财务 connector |
 | **生产阶段** | 替换为更稳定 provider | 不改 strategy contract |
 
+## MVP1 已知简化（待后续回归加强）
+
+> [!WARNING]
+> 以下简化项在 MVP1 中采用，后续版本必须回归并加强。
+
+| 编号 | 简化项 | MVP1 做法 | 目标做法 | 回归版本 |
+|------|--------|----------|---------|---------|
+| S-01 | `gross_margin_stability` 窗口 | **4Q**（最近 4 季度标准差倒数） | 12Q（12 季度） | MVP2 |
+| S-02 | 行业分类 | **东财行业板块** | 申万行业 L1/L2 标准分类 | MVP2 |
+| S-03 | `risk_goodwill_high` | **简单阈值**：商誉/净资产 > 30% | 复合判断：商誉增速 + 减值风险模型 | MVP2 |
+| S-04 | `risk_equity_pledge_high` | **简单阈值**：质押比例 > 50% | 加入爆仓线距离 + 大股东质押比例 | MVP2 |
+| S-05 | `risk_regulatory_probe` | **公告关键词匹配** | NLP 分类 + 严重性评估 | MVP2+ |
+| S-06 | `risk_material_negative_announcement` | **暂跳过**（默认 False） | 接入公告 NLP pipeline | MVP2+ |
+| S-07 | Data freshness SLA | **暂跳过** | 按 `data_freshness_profiles.yaml` 检查 | MVP2 |
+
 ---
 
 # 十三、首版仓库目录结构

@@ -1,0 +1,152 @@
+{
+  "request_id": "req-20260327-162500",
+  "run_id": "run-20260327-162500",
+  "asof": "2026-03-27T16:25:00.175067Z",
+  "strategy_id": "growth_capture_12m_v1",
+  "strategy_version": "0.1.0",
+  "universe_version": "uv-20260327-001",
+  "data_version": "dv-20260327-001",
+  "feature_version": "fv-20260327-001",
+  "policy_version": "pv-20260327-001",
+  "security": {
+    "ticker": "688796",
+    "exchange": "SSE",
+    "name": "百奥赛图",
+    "board": "star",
+    "security_type": "common_stock",
+    "industry_l1": "医药生物",
+    "industry_l2": null
+  },
+  "universe_membership": {
+    "included": true,
+    "inclusion_reasons": [
+      "INC_FULL_MARKET_SEED",
+      "INC_SECURITY_TYPE_COMMON_STOCK",
+      "INC_BOARD_ALLOWED",
+      "INC_LISTED_DAYS_PASS",
+      "INC_LIQUIDITY_PASS",
+      "INC_FINANCIALS_READY",
+      "INC_AUDIT_PASS",
+      "INC_POSITIVE_EQUITY_PASS"
+    ],
+    "exclusion_reasons": []
+  },
+  "result_state": "ok",
+  "state_reason_codes": [],
+  "total_score": 55.6962,
+  "rank": 1,
+  "percentile_rank": 0.0,
+  "sub_scores": {
+    "risk_penalty": 0.0,
+    "profitability_quality": null,
+    "cashflow_balance_sheet": null,
+    "growth_regime": null,
+    "valuation_sanity": null,
+    "market_confirmation": 9.2678,
+    "quality_durability": null,
+    "value_yield": null,
+    "capital_allocation": null,
+    "growth_acceleration": 16.7678,
+    "growth_quality": 13.4821,
+    "industry_momentum": 10.0,
+    "valuation_constraint": 6.1785
+  },
+  "penalties": [],
+  "label": "暂不优先",
+  "confidence": 1.0,
+  "drivers": [
+    {
+      "code": "DRV_TURNOVER_SUPPORT",
+      "title": "turnover_support 表现突出",
+      "detail": "turnover_support 归一化值 0.62，原始值 0.6440676759079726。",
+      "metric_id": "turnover_support",
+      "raw_value": 0.6440676759079726,
+      "normalized_value": 0.6178511301978798,
+      "direction": "higher_better",
+      "source_refs": []
+    },
+    {
+      "code": "DRV_PE_PCTILE_IN_INDUSTRY",
+      "title": "pe_pctile_in_industry 表现突出",
+      "detail": "pe_pctile_in_industry 归一化值 0.62，原始值 0.8888888888888888。",
+      "metric_id": "pe_pctile_in_industry",
+      "raw_value": 0.8888888888888888,
+      "normalized_value": 0.617851130197758,
+      "direction": "lower_better",
+      "source_refs": []
+    },
+    {
+      "code": "DRV_REVENUE_CAGR_3Y",
+      "title": "revenue_cagr_3y 表现突出",
+      "detail": "revenue_cagr_3y 归一化值 0.62，原始值 0.4469428571428572。",
+      "metric_id": "revenue_cagr_3y",
+      "raw_value": 0.4469428571428572,
+      "normalized_value": 0.6178511301977578,
+      "direction": "higher_better",
+      "source_refs": []
+    }
+  ],
+  "risks": [],
+  "triggers": [
+    {
+      "code": "TRG_QUARTERLY_EARNINGS",
+      "title": "季度业绩披露",
+      "condition": "下一季度业绩披露后重新评估 growth_regime 分组",
+      "watch_metric": "revenue_yoy_acceleration",
+      "source_refs": []
+    },
+    {
+      "code": "TRG_MAJOR_ANNOUNCEMENT",
+      "title": "重大公告监控",
+      "condition": "如出现重大重组、并购、增发等公告，触发重新评估",
+      "watch_metric": null,
+      "source_refs": []
+    }
+  ],
+  "invalidation": [
+    {
+      "code": "INV_ST_DESIGNATION",
+      "title": "被 ST 标记",
+      "condition": "如被实施 ST 或 *ST，当前结论立即失效",
+      "watch_metric": null,
+      "source_refs": []
+    },
+    {
+      "code": "INV_DELISTING_NOTICE",
+      "title": "退市风险警示",
+      "condition": "如收到退市风险警示或终止上市决定，当前结论立即失效",
+      "watch_metric": null,
+      "source_refs": []
+    },
+    {
+      "code": "INV_MAJOR_FRAUD",
+      "title": "重大财务造假",
+      "condition": "如被证实存在重大财务造假，当前结论立即失效",
+      "watch_metric": null,
+      "source_refs": []
+    }
+  ],
+  "data_quality": {
+    "critical_complete": true,
+    "missing_features": [],
+    "stale_sources": [],
+    "degraded_reasons": []
+  },
+  "audit": {
+    "render_tier": "R0",
+    "disclaimer_id": "CN_R0_RESEARCH_ONLY_V1",
+    "policy_passed": true,
+    "banned_terms_checked": true,
+    "source_hashes": [],
+    "applied_reason_codes": [
+      "INC_FULL_MARKET_SEED",
+      "INC_SECURITY_TYPE_COMMON_STOCK",
+      "INC_BOARD_ALLOWED",
+      "INC_LISTED_DAYS_PASS",
+      "INC_LIQUIDITY_PASS",
+      "INC_FINANCIALS_READY",
+      "INC_AUDIT_PASS",
+      "INC_POSITIVE_EQUITY_PASS"
+    ]
+  }
+}

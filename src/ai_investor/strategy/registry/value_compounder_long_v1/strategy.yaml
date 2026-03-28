@@ -1,0 +1,312 @@
+# ---------------------------------------------------------------------------
+# Sleeve A: 价值复利引擎
+# ---------------------------------------------------------------------------
+strategy_id: value_compounder_long_v1
+strategy_version: 0.1.0
+display_name: "A股价值复利引擎 v1"
+description: >
+  目标：找能长期持有的价值/质量/现金流资产。
+  持有期：12–36 个月。
+  设计参考：中证 800 价值（D/P、B/P、CF/P、E/P）、
+  中证全指红利质量（ROE、DROE、OPCFD、DP）。
+owner: "research-platform"
+status: draft
+mode: research_only
+timezone: Asia/Shanghai
+reason_code_registry_ref: "../universe_reason_codes.yaml"
+data_freshness_profile_ref: ashare_r0_daily_v1
+
+schedule:
+  run_windows:
+    - post_close_daily
+    - weekly_validation
+  asof_rule: trading_day_close
+  research_refresh: weekly
+
+market:
+  exchanges:
+    - SSE
+    - SZSE
+  boards:
+    - main
+    # 创业板只纳入成熟盈利股（由 eligibility 过滤）
+    - chinext
+  security_types:
+    - common_stock
+  currency: CNY
+
+universe:
+  include_seeds:
+    - code: INC_FULL_MARKET_SEED
+      enabled: true
+    - code: INC_USER_WATCHLIST
+      enabled: true
+    - code: INC_THEME_SLICE
+      enabled: false
+    - code: INC_SIGNAL_CANDIDATE
+      enabled: false
+  hard_exclusions:
+    - EXC_NOT_COMMON_STOCK
+    - EXC_ETF
+    - EXC_REIT
+    - EXC_B_SHARE
+    - EXC_BOND_LIKE
+    - EXC_ST_OR_RISK_WARNING
+    - EXC_DELISTING_PHASE
+    - EXC_SUSPENDED
+    - EXC_BOARD_NOT_ALLOWED
+  eligibility_rules:
+    min_listed_trading_days: 60     # [HOTFIX] Temporarily set to 60 because current snapshot capped at 120 calendar days (~80 trading days)
+    min_adv20_amount_cny: 50000
+    require_positive_equity: true
+    require_latest_financials: true
+    require_standard_unqualified_audit: true
+    # 价值策略额外要求：最近 3 年有连续分红记录
+    # require_consecutive_dividends_years: 3  # TODO: 待数据源接通
+  versioning:
+    policy: daily_snapshot
+    key_fields:
+      - asof
+      - market.exchanges
+      - market.boards
+      - universe.include_seeds
+      - universe.hard_exclusions
+      - universe.eligibility_rules
+
+data_contract:
+  truth_sources:
+    - exchange_announcements
+    - statutory_filings
+    - official_market_data
+  structured_sources:
+    - valuation_reference
+    - industry_classification
+    - dividend_history
+  attention_sources:
+    - media_news
+    - policy_heat
+  pit_required_fields:
+    - published_at
+    - available_at
+    - retrieved_at
+    - asof
+    - source_name
+    - source_hash
+    - parser_version
+
+# =========================================================================
+# 价值复利引擎 · 特征管线
+# =========================================================================
+feature_pipeline:
+  normalization:
+    peer_group:
+      - board
+      - industry_anchor        # 证监会行业分类
+      - size_bucket             # 大/中/小市值
+    winsorize_pct: [0.02, 0.98]
+    zscore_clip: 3.0
+  missing_data_policy:
+    critical_fields_block: true
+    noncritical_fields_degrade: true
+
+  feature_groups:
+    # ── 维度 1: 质量耐久 (30) ──────────────────────────────
+    quality_durability:
+      weight: 30
+      metrics:
+        - id: roe_ttm
+          direction: higher_better
+          critical: true
+        - id: gross_margin_stability_12q
+          direction: higher_better
+          critical: false
+
+    # ── 维度 2: 现金流与资产/盈利成长 (25) ────────────────────
+    cashflow_balance_sheet:
+      weight: 25
+      metrics:
+        - id: cfo_to_net_profit_ttm
+          direction: higher_better
+          critical: true
+        - id: fcf_ttm_margin
+          direction: higher_better
+          critical: false
+        - id: net_debt_to_ebitda
+          direction: lower_better
+          critical: true
+        - id: profit_cagr_3y
+          direction: higher_better
+          critical: false
+
+    # ── 维度 3: 价值收益 (40) ──────────────────────────────
+    value_yield:
+      weight: 40
+      metrics:
+        - id: bps_yield
+          direction: higher_better
+          critical: false
+          # B/P
+        - id: cf_yield
+          direction: higher_better
+          critical: false
+          # CF/P = CFO Yield
+        - id: eps_yield
+          direction: higher_better
+          critical: true
+          # E/P = 1/PE
+
+    # ── 维度 4: 市场确认 (5) ───────────────────────────────
+    # 价值策略里市场确认权重极低，仅做 confirmation
+    market_confirmation:
+      weight: 5
+      metrics:
+        - id: rs_60d
+          direction: higher_better
+          critical: false
+        - id: ma_structure
+          direction: higher_better
+          critical: false
+
+risk_overlays:
+  max_penalty_points: 25
+  items:
+    - code: RISK_GOODWILL_HIGH
+      penalty: 5
+      # 商誉 / 净资产 > 30%
+    - code: RISK_EQUITY_PLEDGE_HIGH
+      penalty: 5
+      # 大股东质押比例 > 50%
+    - code: RISK_REGULATORY_PROBE
+      penalty: 8
+      # 重大立案/处罚
+    - code: RISK_MAJOR_REDUCTION
+      penalty: 3
+      # 重要股东集中减持
+    - code: RISK_MATERIAL_NEGATIVE_ANNOUNCEMENT
+      penalty: 8
+    - code: RISK_AUDIT_QUALIFIED
+      penalty: 10
+      # 审计意见非标
+    - code: RISK_FINANCIAL_RESTATEMENT
+      penalty: 6
+      # 财务重述
+
+attention_overlay:
+  enabled: true
+  positive_alpha_weight: 0
+  outputs:
+    - attention_queue
+    - risk_flag
+
+label_mapping:
+  # V2 使用分位标签，此处保留绝对阈值作为 fallback
+  # 实际运行时由 strategy_family.yaml 的 label_mode=percentile 覆盖
+  score_bands:
+    - min: 80
+      max: 100
+      label: 重点研究
+    - min: 65
+      max: 79.9999
+      label: 继续跟踪
+    - min: 45
+      max: 64.9999
+      label: 暂不优先
+    - min: 0
+      max: 44.9999
+      label: 回避
+  blocked_label: 回避
+
+output_contract:
+  schema_ref: "../score_result.schema.json"
+  required_fields:
+    - request_id
+    - run_id
+    - asof
+    - strategy_id
+    - strategy_version
+    - universe_version
+    - data_version
+    - feature_version
+    - policy_version
+    - security
+    - universe_membership
+    - result_state
+    - state_reason_codes
+    - total_score
+    - rank
+    - percentile_rank
+    - sub_scores
+    - penalties
+    - label
+    - confidence
+    - drivers
+    - risks
+    - triggers
+    - invalidation
+    - data_quality
+    - effective_weight_coverage    # V2 新增
+    - missing_weight_share         # V2 新增
+    - audit
+  allowed_tiers:
+    - R0
+  disclaimer_id: CN_R0_RESEARCH_ONLY_V1
+
+policy:
+  result_states:
+    - ok
+    - degraded
+    - blocked
+    - rank_excluded              # V2 新增：有分但因覆盖率不足不参与排名
+  degraded_reason_codes:
+    - DGD_MISSING_NONCRITICAL_FEATURES
+    - DGD_STALE_ATTENTION_SOURCE
+    - DGD_PARTIAL_VALUATION_FALLBACK
+  block_reason_codes:
+    - BLK_MISSING_CRITICAL_INPUTS
+    - BLK_POLICY_DISALLOWED
+    - BLK_UNIVERSE_EXCLUDED
+    - BLK_INSUFFICIENT_WEIGHT_COVERAGE  # V2 新增
+  banned_output_actions:
+    - guaranteed_return
+    - auto_trade
+    - discretionary_order
+    - personalized_profit_commitment
+
+validation:
+  backtest:
+    rebalance: monthly           # 价值策略月度换仓
+    evaluation_horizons_days:
+      - 120
+      - 250
+    benchmarks:
+      - CSI300
+      - CSI800_VALUE             # 中证 800 价值
+    # 价值引擎额外关注
+    value_metrics:
+      - excess_return_250d
+      - max_drawdown
+      - turnover_rate
+      - dividend_yield_portfolio
+      - sector_exposure
+      - value_trap_hit_rate
+  promotion_gate:
+    require_positive_top_quintile_spread: true
+    require_rank_ic_positive_ratio_gte: 0.55
+    require_turnover_within_limit: true
+    max_single_industry_weight: 0.35
+
+audit:
+  log_required: true
+  audit_keys:
+    - request_id
+    - run_id
+    - asof
+    - strategy_id
+    - strategy_version
+    - universe_version
+    - data_version
+    - feature_version
+    - policy_version
+    - source_hashes
+    - applied_reason_codes
+    - effective_weight_coverage

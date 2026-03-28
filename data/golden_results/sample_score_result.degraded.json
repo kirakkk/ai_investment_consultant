@@ -1,0 +1,131 @@
+{
+  "request_id": "req-20260324-002",
+  "run_id": "run-20260324-postclose-001",
+  "asof": "2026-03-24T15:00:00+08:00",
+  "strategy_id": "ashare_quality_cashflow_regime_v1",
+  "strategy_version": "0.1.0",
+  "universe_version": "uv-20260324-001",
+  "data_version": "dv-20260324-001",
+  "feature_version": "fv-20260324-001",
+  "policy_version": "pv-20260324-001",
+  "security": {
+    "ticker": "300750",
+    "exchange": "SZSE",
+    "name": "宁德时代",
+    "board": "chinext",
+    "security_type": "common_stock",
+    "industry_l1": "电力设备",
+    "industry_l2": "电池"
+  },
+  "universe_membership": {
+    "included": true,
+    "inclusion_reasons": [
+      "INC_FULL_MARKET_SEED",
+      "INC_BOARD_ALLOWED",
+      "INC_LIQUIDITY_PASS"
+    ],
+    "exclusion_reasons": []
+  },
+  "result_state": "degraded",
+  "state_reason_codes": [
+    "DGD_PARTIAL_VALUATION_FALLBACK",
+    "DGD_STALE_ATTENTION_SOURCE"
+  ],
+  "label": "继续跟踪",
+  "total_score": 68.2,
+  "rank": 87,
+  "percentile_rank": 0.29,
+  "confidence": 0.71,
+  "sub_scores": {
+    "profitability_quality": 18.5,
+    "cashflow_balance_sheet": 14.0,
+    "growth_regime": 16.0,
+    "valuation_sanity": 6.7,
+    "market_confirmation": 13.0,
+    "risk_penalty": 0
+  },
+  "penalties": [],
+  "drivers": [
+    {
+      "code": "DRV_GROWTH_ACCELERATION",
+      "title": "营收增速加速",
+      "detail": "营收 YoY 加速度 +5.2pp，利润加速度 +3.8pp，景气上行。",
+      "metric_id": "revenue_yoy_acceleration",
+      "raw_value": 0.052,
+      "normalized_value": 0.78,
+      "direction": "higher_better",
+      "source_refs": [
+        {
+          "source_name": "2025Q3 季报",
+          "source_type": "truth",
+          "asof": "2025-10-30T00:00:00+08:00",
+          "source_hash": "sha256:aaa111bbb222"
+        }
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "code": "RISK_EQUITY_PLEDGE_HIGH",
+      "title": "股权质押比例偏高",
+      "detail": "第一大股东质押比例 42%，超过 30% 警戒线。",
+      "severity": "medium",
+      "source_refs": [
+        {
+          "source_name": "SZSE 质押数据",
+          "source_type": "structured",
+          "asof": "2026-03-22T00:00:00+08:00",
+          "source_hash": "sha256:ccc333ddd444"
+        }
+      ]
+    }
+  ],
+  "triggers": [
+    {
+      "code": "TRG_VALUATION_REFRESH",
+      "title": "估值数据恢复后重评",
+      "condition": "EV/EBITDA 指标恢复可用后，重新计算 valuation_sanity 分组",
+      "watch_metric": "ev_ebitda_pctile_in_industry",
+      "source_refs": []
+    }
+  ],
+  "invalidation": [
+    {
+      "code": "INV_EARNINGS_MISS",
+      "title": "业绩大幅低于预期",
+      "condition": "实际营收或归母净利润低于一致预期 20% 以上",
+      "watch_metric": "revenue_yoy_acceleration",
+      "source_refs": []
+    }
+  ],
+  "data_quality": {
+    "critical_complete": true,
+    "missing_features": [
+      "ev_ebitda_pctile_in_industry"
+    ],
+    "stale_sources": [
+      "media_news"
+    ],
+    "degraded_reasons": [
+      "DGD_PARTIAL_VALUATION_FALLBACK",
+      "DGD_STALE_ATTENTION_SOURCE"
+    ]
+  },
+  "audit": {
+    "render_tier": "R0",
+    "disclaimer_id": "CN_R0_RESEARCH_ONLY_V1",
+    "policy_passed": true,
+    "banned_terms_checked": true,
+    "source_hashes": [
+      "sha256:aaa111bbb222",
+      "sha256:ccc333ddd444"
+    ],
+    "applied_reason_codes": [
+      "INC_FULL_MARKET_SEED",
+      "INC_BOARD_ALLOWED",
+      "INC_LIQUIDITY_PASS",
+      "DGD_PARTIAL_VALUATION_FALLBACK",
+      "DGD_STALE_ATTENTION_SOURCE"
+    ]
+  }
+}

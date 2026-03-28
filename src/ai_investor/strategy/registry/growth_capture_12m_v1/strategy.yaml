@@ -1,0 +1,336 @@
+# ---------------------------------------------------------------------------
+# Sleeve B: 成长捕获引擎
+# ---------------------------------------------------------------------------
+strategy_id: growth_capture_12m_v1
+strategy_version: 0.1.0
+display_name: "A股成长捕获引擎 v1"
+description: >
+  目标：找未来 1 年可能兑现高增长的标的。
+  持有期：3–12 个月。
+  设计参考：中证 500 质量成长（盈利能力＋成长能力＋盈利质量＋财务杠杆）、
+  中证创业成长（3Y 营收/利润增速 + ROE）。
+  金融与非金融行业分开归一化。
+owner: "research-platform"
+status: draft
+mode: research_only
+timezone: Asia/Shanghai
+reason_code_registry_ref: "../universe_reason_codes.yaml"
+data_freshness_profile_ref: ashare_r0_daily_v1
+
+schedule:
+  run_windows:
+    - post_close_daily
+    - weekly_validation
+  asof_rule: trading_day_close
+  research_refresh: weekly
+
+market:
+  exchanges:
+    - SSE
+    - SZSE
+  boards:
+    - main
+    - chinext
+    # 成长策略纳入科创板
+    - star
+  security_types:
+    - common_stock
+  currency: CNY
+
+universe:
+  include_seeds:
+    - code: INC_FULL_MARKET_SEED
+      enabled: true
+    - code: INC_USER_WATCHLIST
+      enabled: true
+    - code: INC_THEME_SLICE
+      enabled: true
+    - code: INC_SIGNAL_CANDIDATE
+      enabled: false
+  hard_exclusions:
+    - EXC_NOT_COMMON_STOCK
+    - EXC_ETF
+    - EXC_REIT
+    - EXC_B_SHARE
+    - EXC_BOND_LIKE
+    - EXC_ST_OR_RISK_WARNING
+    - EXC_DELISTING_PHASE
+    - EXC_SUSPENDED
+    - EXC_BOARD_NOT_ALLOWED
+  eligibility_rules:
+    min_listed_trading_days: 60      # 成长策略：至少 60 天即可
+    min_adv20_amount_cny: 50000
+    require_positive_equity: true
+    require_latest_financials: true
+    require_standard_unqualified_audit: true
+  versioning:
+    policy: daily_snapshot
+    key_fields:
+      - asof
+      - market.exchanges
+      - market.boards
+      - universe.include_seeds
+      - universe.hard_exclusions
+      - universe.eligibility_rules
+
+data_contract:
+  truth_sources:
+    - exchange_announcements
+    - statutory_filings
+    - official_market_data
+  structured_sources:
+    - valuation_reference
+    - industry_classification
+    - capex_orders_proxy
+  attention_sources:
+    - media_news
+    - policy_heat
+    - social_buzz
+  pit_required_fields:
+    - published_at
+    - available_at
+    - retrieved_at
+    - asof
+    - source_name
+    - source_hash
+    - parser_version
+
+# =========================================================================
+# 成长捕获引擎 · 特征管线
+# =========================================================================
+feature_pipeline:
+  normalization:
+    peer_group:
+      - board
+      - industry_anchor
+      - size_bucket
+    # 金融与非金融行业分开归一化（参考中证 500 质量成长编制方法）
+    sector_split:
+      - financial
+      - non_financial
+    winsorize_pct: [0.02, 0.98]
+    zscore_clip: 3.0
+  missing_data_policy:
+    critical_fields_block: true
+    noncritical_fields_degrade: true
+
+  feature_groups:
+    # ── 维度 1: 成长加速度 (30) ────────────────────────────
+    growth_acceleration:
+      weight: 30
+      metrics:
+        - id: revenue_cagr_3y
+          direction: higher_better
+          critical: true
+          # 三年营业收入平均增速
+        - id: profit_cagr_3y
+          direction: higher_better
+          critical: true
+          # 三年净利润平均增速
+        - id: revenue_yoy_acceleration
+          direction: higher_better
+          critical: false
+          # 近 4 个季度营收增速加速度（Q-on-Q delta）
+        - id: profit_yoy_acceleration
+          direction: higher_better
+          critical: false
+          # 近 4 个季度利润增速加速度
+
+    # ── 维度 2: 成长质量 (25) ──────────────────────────────
+    growth_quality:
+      weight: 25
+      metrics:
+        - id: roe_ttm
+          direction: higher_better
+          critical: true
+        - id: cfo_to_net_profit_ttm
+          direction: higher_better
+          critical: true
+          # 利润兑现度：经营现金流 / 净利润
+        - id: operating_margin_delta
+          direction: higher_better
+          critical: false
+          # 营业利润率改善幅度
+
+    # ── 维度 3: 行业景气/赛道强度 (20) ─────────────────────
+    industry_momentum:
+      weight: 20
+      metrics:
+        - id: industry_regime_strength
+          direction: higher_better
+          critical: false
+          # 行业 RS60d 中位数 / 全市场中位数
+
+    # ── 维度 4: 市场确认 (15) ──────────────────────────────
+    # 成长策略里市场确认权重较高，趋势信号参与排序
+    market_confirmation:
+      weight: 15
+      metrics:
+        - id: rs_60d
+          direction: higher_better
+          critical: false
+        - id: ma_structure
+          direction: higher_better
+          critical: false
+        - id: turnover_support
+          direction: higher_better
+          critical: false
+
+    # ── 维度 5: 估值约束 (10) ──────────────────────────────
+    # 成长策略不追极端贵，但权重较低
+    valuation_constraint:
+      weight: 10
+      metrics:
+        - id: peg_ratio
+          direction: lower_better
+          critical: false
+          # PEG = PE / 预期利润增速，越低越好
+        - id: pe_pctile_in_industry
+          direction: lower_better
+          critical: false
+          # 行业内 PE 分位数作为估值约束
+
+risk_overlays:
+  max_penalty_points: 25
+  items:
+    - code: RISK_GOODWILL_HIGH
+      penalty: 5
+    - code: RISK_EQUITY_PLEDGE_HIGH
+      penalty: 5
+    - code: RISK_REGULATORY_PROBE
+      penalty: 8
+    - code: RISK_MAJOR_REDUCTION
+      penalty: 5
+      # 成长股减持信号更敏感
+    - code: RISK_MATERIAL_NEGATIVE_ANNOUNCEMENT
+      penalty: 8
+    - code: RISK_HIGH_VOLATILITY
+      penalty: 3
+      # 近 60 日波动率 > 阈值
+    - code: RISK_AUDIT_QUALIFIED
+      penalty: 10
+    - code: RISK_FINANCIAL_RESTATEMENT
+      penalty: 6
+
+attention_overlay:
+  enabled: true
+  positive_alpha_weight: 0
+  outputs:
+    - attention_queue
+    - risk_flag
+
+label_mapping:
+  # V2 使用分位标签，此处保留绝对阈值作为 fallback
+  score_bands:
+    - min: 80
+      max: 100
+      label: 重点研究
+    - min: 65
+      max: 79.9999
+      label: 继续跟踪
+    - min: 45
+      max: 64.9999
+      label: 暂不优先
+    - min: 0
+      max: 44.9999
+      label: 回避
+  blocked_label: 回避
+
+output_contract:
+  schema_ref: "../score_result.schema.json"
+  required_fields:
+    - request_id
+    - run_id
+    - asof
+    - strategy_id
+    - strategy_version
+    - universe_version
+    - data_version
+    - feature_version
+    - policy_version
+    - security
+    - universe_membership
+    - result_state
+    - state_reason_codes
+    - total_score
+    - rank
+    - percentile_rank
+    - sub_scores
+    - penalties
+    - label
+    - confidence
+    - drivers
+    - risks
+    - triggers
+    - invalidation
+    - data_quality
+    - effective_weight_coverage
+    - missing_weight_share
+    - audit
+  allowed_tiers:
+    - R0
+  disclaimer_id: CN_R0_RESEARCH_ONLY_V1
+
+policy:
+  result_states:
+    - ok
+    - degraded
+    - blocked
+    - rank_excluded
+  degraded_reason_codes:
+    - DGD_MISSING_NONCRITICAL_FEATURES
+    - DGD_STALE_ATTENTION_SOURCE
+    - DGD_PARTIAL_VALUATION_FALLBACK
+  block_reason_codes:
+    - BLK_MISSING_CRITICAL_INPUTS
+    - BLK_POLICY_DISALLOWED
+    - BLK_UNIVERSE_EXCLUDED
+    - BLK_INSUFFICIENT_WEIGHT_COVERAGE
+  banned_output_actions:
+    - guaranteed_return
+    - auto_trade
+    - discretionary_order
+    - personalized_profit_commitment
+
+validation:
+  backtest:
+    rebalance: weekly            # 成长策略周度换仓
+    evaluation_horizons_days:
+      - 20
+      - 60
+      - 120
+      - 250
+    benchmarks:
+      - CSI500
+      - CSI500_QUALITY_GROWTH    # 中证 500 质量成长
+    # 成长引擎额外关注
+    growth_metrics:
+      - excess_return_60d
+      - excess_return_120d
+      - rank_ic
+      - hit_rate
+      - earnings_realization_rate
+      - max_drawdown
+      - turnover_rate
+      - theme_crowding
+  promotion_gate:
+    require_positive_top_quintile_spread: true
+    require_rank_ic_positive_ratio_gte: 0.55
+    require_turnover_within_limit: true
+    max_single_industry_weight: 0.30  # 成长策略行业集中度限制更严
+
+audit:
+  log_required: true
+  audit_keys:
+    - request_id
+    - run_id
+    - asof
+    - strategy_id
+    - strategy_version
+    - universe_version
+    - data_version
+    - feature_version
+    - policy_version
+    - source_hashes
+    - applied_reason_codes
+    - effective_weight_coverage

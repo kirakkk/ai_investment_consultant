@@ -1,0 +1,47 @@
+strategy_family_id: ashare_dual_sleeve_v2
+display_name: "A股双引擎策略家族 v2"
+description: >
+  将 V1 的单一混合策略拆分为 "价值复利" + "成长捕获" 双引擎。
+  两条线在各自策略空间内独立排序，不做最终加权混合。
+owner: "research-platform"
+status: draft
+
+sleeves:
+  - strategy_id: value_compounder_long_v1
+    strategy_dir: ./value_compounder_long_v1
+    objective: 长期价值复利
+    horizon_days: [250, 500]
+
+  - strategy_id: growth_capture_12m_v1
+    strategy_dir: ./growth_capture_12m_v1
+    objective: 1年内成长捕获
+    horizon_days: [20, 60, 120, 250]
+
+# 两个引擎共享的规则 —— 引擎自身 strategy.yaml 可以 override
+shared_rules:
+  # 有效权重覆盖率：低于此值的标的禁止进入全市场排名
+  ranking_requires_effective_weight_coverage_gte: 0.90
+
+  # 行业锚点：证监会 2024 《上市公司行业统计分类与代码》
+  industry_anchor: csrc_jrt0020_2024
+  # 策略行业映射：申万三级 → 用于因子中性化
+  industry_strategy: shenwan_l3_2021
+  # 行业源全挂时的兜底对等分组
+  fallback_peer_group: [board, size_bucket]
+
+  # 风控真值层必须接通，否则不产出正式排名
+  risk_truth_required: true
+
+  # 标签模式：percentile（而非绝对分数阈值）
+  label_mode: percentile
+  label_percentiles:
+    重点研究: 0.05    # Top 5%
+    继续跟踪: 0.20    # Next 15%  (5%~20%)
+    暂不优先: 0.50    # Next 30%  (20%~50%)
+    回避: 1.00        # Bottom 50%
+
+  # 中性化维度
+  neutralization_axes:
+    - board
+    - industry_anchor
+    - size_bucket
