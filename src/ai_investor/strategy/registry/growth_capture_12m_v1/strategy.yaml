@@ -115,9 +115,10 @@ feature_pipeline:
     noncritical_fields_degrade: true
 
   feature_groups:
-    # ── 维度 1: 成长加速度 (30) ────────────────────────────
+    # ── 维度 1: 成长加速度 (40) ────────────────────────────
+    # V3-P0: was 30, +10 from deleted industry_momentum
     growth_acceleration:
-      weight: 30
+      weight: 40
       metrics:
         - id: revenue_cagr_3y
           direction: higher_better
@@ -136,9 +137,10 @@ feature_pipeline:
           critical: false
           # 近 4 个季度利润增速加速度
 
-    # ── 维度 2: 成长质量 (25) ──────────────────────────────
+    # ── 维度 2: 成长质量 (35) ──────────────────────────────
+    # V3-P0: was 25, +10 from deleted industry_momentum
     growth_quality:
-      weight: 25
+      weight: 35
       metrics:
         - id: roe_ttm
           direction: higher_better
@@ -152,14 +154,11 @@ feature_pipeline:
           critical: false
           # 营业利润率改善幅度
 
-    # ── 维度 3: 行业景气/赛道强度 (20) ─────────────────────
-    industry_momentum:
-      weight: 20
-      metrics:
-        - id: industry_regime_strength
-          direction: higher_better
-          critical: false
-          # 行业 RS60d 中位数 / 全市场中位数
+    # ── 维度 3 (已删除): industry_momentum ──────────────────
+    # V3-P0: 已在审计中确认为死因子。industry_regime_strength
+    # 在 peer-group (board×industry×size) 归一化后,
+    # 每个组内值恒为常量 → z-score=0.5 → 零辨识力。
+    # 20 权重浪费。行业景气未来作为报告层注释保留，不进入打分。
 
     # ── 维度 4: 市场确认 (15) ──────────────────────────────
     # 成长策略里市场确认权重较高，趋势信号参与排序

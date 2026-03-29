@@ -34,6 +34,8 @@ class ScoringResult:
     # V2: coverage metadata
     effective_weight_coverage: float = 1.0
     missing_weight_share: float = 0.0
+    # V3-P0: carry forward missing_critical flag for rank exclusion
+    _missing_critical: bool = False
 
 
 def _compute_sub_scores(
@@ -104,9 +106,12 @@ def _assign_percentile_labels(
       暂不优先: 0.50   → next 30%
       回避: 1.00       → bottom 50%
 
-    If max_industry_pct > 0, enforces industry concentration cap:
-    any single industry exceeding max_industry_pct of a label tier
-    gets its excess stocks demoted to the next tier.
+    V3-P0 fixes:
+      - Industry cap now uses backfill-to-capacity: after demoting excess
+        stocks, promote highest-scored from next tier (respecting cap)
+        until tier reaches target capacity or no eligible candidates remain.
+      - Target capacity is computed from the eligible (ranked) population,
+        not the post-demotion remnant.
     """
     pct_map = config.get_label_percentiles()
     if not pct_map:
@@ -128,38 +133,76 @@ def _assign_percentile_labels(
         else:
             r.label = sorted_labels[-1][0]
 
-    # Phase 2: enforce industry concentration cap
+    # Phase 2: enforce industry concentration cap with backfill-to-capacity
     if max_industry_pct > 0:
         import logging
+        from collections import Counter
         logger = logging.getLogger(__name__)
-        # Process each label tier except the last (bottom bucket absorbs overflow)
+
+        # Compute target capacity for each tier based on eligible population
+        eligible_count = sum(1 for r in results if r.percentile_rank is not None)
+        target_capacities: dict[str, int] = {}
+        prev_cum = 0.0
+        for label_name, cum_pct in sorted_labels:
+            tier_pct = cum_pct - prev_cum
+            target_capacities[label_name] = max(1, round(eligible_count * tier_pct))
+            prev_cum = cum_pct
+
+        # Process each tier from top to bottom (except last, which absorbs)
         for tier_idx in range(len(sorted_labels) - 1):
             tier_label = sorted_labels[tier_idx][0]
             next_label = sorted_labels[tier_idx + 1][0]
+            target_cap = target_capacities[tier_label]
+            max_per_industry = max(1, int(target_cap * max_industry_pct))
 
+            # Step A: Demote excess from over-represented industries
             tier_results = [r for r in results if r.label == tier_label]
-            if not tier_results:
-                continue
-
-            tier_size = len(tier_results)
-            max_per_industry = max(1, int(tier_size * max_industry_pct))
-
-            # Count per industry, demote excess (lowest-scored first)
-            from collections import defaultdict
-            industry_count: dict[str, int] = defaultdict(int)
-            # tier_results are already sorted desc by total_score (inherited from parent sort)
+            industry_count: dict[str, int] = {}
             demoted = []
             for r in tier_results:
                 ind = r.industry or "unknown"
-                industry_count[ind] += 1
+                industry_count[ind] = industry_count.get(ind, 0) + 1
                 if industry_count[ind] > max_per_industry:
                     r.label = next_label
                     demoted.append((r.ticker, ind))
 
+            # Step B: Backfill from next tier to reach target_cap
+            current_count = sum(1 for r in results if r.label == tier_label)
+            if current_count < target_cap:
+                # Candidates: stocks currently in next_label, sorted by score desc
+                candidates = sorted(
+                    [r for r in results if r.label == next_label],
+                    key=lambda r: r.total_score,
+                    reverse=True,
+                )
+                # Rebuild industry count for current tier
+                industry_count_now: dict[str, int] = Counter(
+                    r.industry or "unknown"
+                    for r in results if r.label == tier_label
+                )
+                promoted = []
+                for c in candidates:
+                    if current_count >= target_cap:
+                        break
+                    ind = c.industry or "unknown"
+                    if industry_count_now.get(ind, 0) < max_per_industry:
+                        c.label = tier_label
+                        industry_count_now[ind] = industry_count_now.get(ind, 0) + 1
+                        current_count += 1
+                        promoted.append((c.ticker, ind))
+
+                if promoted:
+                    logger.info(
+                        f"Industry cap backfill: promoted {len(promoted)} "
+                        f"into '{tier_label}' (target={target_cap})"
+                    )
+
             if demoted:
+                final_count = sum(1 for r in results if r.label == tier_label)
                 logger.info(
-                    f"Industry cap: demoted {len(demoted)} from '{tier_label}' to '{next_label}' "
-                    f"(max {max_per_industry} per industry in {tier_size} slots)"
+                    f"Industry cap: demoted {len(demoted)} from '{tier_label}', "
+                    f"final={final_count}/{target_cap} "
+                    f"(max {max_per_industry}/industry)"
                 )
 
 
@@ -173,15 +216,9 @@ def score_universe(
 ) -> list[ScoringResult]:
     """Score all tickers in the universe and produce cross-sectional rankings.
 
-    Args:
-        feature_results: Normalized features from the Feature Engine.
-        snapshot_rows: Raw snapshot data as dict per ticker (for risk overlays).
-        config: Strategy configuration.
-        label_mode: Override label mode ("percentile" or "absolute"). If None, uses config.
-        label_percentiles: Override percentile thresholds. If None, uses config.
-
-    Returns:
-        List of ScoringResult sorted by total_score descending.
+    V3-P0 fix: missing_critical tickers are excluded from percentile_rank
+    computation and labeled as blocked. They still appear in results but
+    do not pollute the ranking denominator.
     """
     max_penalty = config.risk_overlays.max_penalty_points
     results: list[ScoringResult] = []
@@ -209,16 +246,26 @@ def score_universe(
             industry=str(row.get("industry_anchor", row.get("industry_l1", ""))),
             effective_weight_coverage=round(eff_cov, 4),
             missing_weight_share=round(miss_share, 4),
+            _missing_critical=fr.missing_critical,  # V3-P0: carry forward
         ))
 
     # Sort by total_score descending for ranking
     results.sort(key=lambda r: r.total_score, reverse=True)
 
-    # Assign rank and percentile rank
-    n = len(results)
-    for i, r in enumerate(results):
+    # V3-P0: Separate scorable vs blocked (missing_critical)
+    scorable = [r for r in results if not r._missing_critical]
+    blocked = [r for r in results if r._missing_critical]
+
+    # Assign rank and percentile rank only to scorable tickers
+    n_scorable = len(scorable)
+    for i, r in enumerate(scorable):
         r.rank = i + 1
-        r.percentile_rank = round(i / n, 4) if n > 0 else None
+        r.percentile_rank = round(i / n_scorable, 4) if n_scorable > 0 else None
+
+    # Blocked tickers get no rank
+    for r in blocked:
+        r.rank = None
+        r.percentile_rank = None
 
     # Label assignment
     effective_label_mode = label_mode or config.get_label_mode()
