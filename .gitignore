@@ -26,3 +26,10 @@ output/
 output_*/
 data/cache/
 data/live_snapshots/
+data/backtest/
+
+# Optimization reports (generated artifacts)
+optimization_*.md
+
+# Scratch test files at project root
+/test_*.py
