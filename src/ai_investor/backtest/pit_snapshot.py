@@ -201,13 +201,16 @@ def _fetch_historical_market_data(
 ) -> pl.DataFrame:
     """Fetch historical daily bars for all tickers around trade_date.
 
-    Pulls 90 trading days of history to compute:
+    Caches raw daily bars per ticker to data/cache/daily/{start}_{end}/
+    so subsequent runs with the same date range skip the API entirely.
+
+    Computes:
     - RS60d (60-day relative strength)
     - MA structure (price vs MA20/MA60)
     - Turnover support
     - Close price (for valuation reconstruction)
-    - Total market value (if available from daily_basic equivalent)
     """
+    import pandas as pd
     import akshare as ak
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from tqdm import tqdm
@@ -216,10 +219,20 @@ def _fetch_historical_market_data(
     # We need ~90 trading days of history
     start_date = (trade_date - datetime.timedelta(days=150)).strftime("%Y%m%d")
     end_date = trade_date.strftime("%Y%m%d")
-    trade_str = trade_date.isoformat()
 
-    def _worker(ticker: str) -> dict:
-        rec = {"ticker": ticker}
+    # Cache directory for this date range
+    cache_dir = Path(f"data/cache/daily/{start_date}_{end_date}")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def _fetch_raw_bars(ticker: str) -> pd.DataFrame | None:
+        """Fetch raw daily bars with per-ticker disk cache."""
+        cache_path = cache_dir / f"{ticker}.parquet"
+        if cache_path.exists():
+            try:
+                return pd.read_parquet(cache_path)
+            except Exception:
+                pass  # re-fetch on corrupt cache
+
         try:
             df = _throttled_call(
                 ak.stock_zh_a_hist,
@@ -227,28 +240,38 @@ def _fetch_historical_market_data(
                 period="daily",
                 start_date=start_date,
                 end_date=end_date,
-                adjust="qfq",  # 前复权 for technical indicators
+                adjust="qfq",
             )
+            if df is not None and not df.empty:
+                try:
+                    df.to_parquet(cache_path, index=False)
+                except Exception:
+                    pass
+                return df
+        except Exception:
+            pass
+        return None
 
-            if df is None or df.empty:
-                return _empty_market_record(ticker)
+    def _compute_indicators(ticker: str, df: pd.DataFrame | None) -> dict:
+        """Compute technical indicators from raw daily bars."""
+        if df is None or df.empty:
+            return _empty_market_record(ticker)
 
+        try:
             date_col = "日期" if "日期" in df.columns else df.columns[0]
             close_col = "收盘" if "收盘" in df.columns else "close"
             vol_col = "成交量" if "成交量" in df.columns else "volume"
-            amount_col = "成交额" if "成交额" in df.columns else "amount"
 
-            df[date_col] = df[date_col].astype(str)
             closes = df[close_col].astype(float).tolist()
             volumes = df[vol_col].astype(float).tolist()
 
             if len(closes) < 5:
                 return _empty_market_record(ticker)
 
-            # Latest close (at trade_date or nearest prior)
+            rec = {"ticker": ticker}
             rec["close"] = closes[-1]
 
-            # RS60d: (close / close_60d_ago - 1)
+            # RS60d
             if len(closes) >= 60:
                 rec["rs_60d"] = (closes[-1] / closes[-60]) - 1
             elif len(closes) >= 20:
@@ -259,18 +282,16 @@ def _fetch_historical_market_data(
             # MA20 & MA60
             ma20 = sum(closes[-20:]) / min(20, len(closes)) if len(closes) >= 20 else None
             ma60 = sum(closes[-60:]) / min(60, len(closes)) if len(closes) >= 60 else None
-
             if ma20 and ma60:
-                # MA structure: 1 if price > MA20 > MA60 (bullish), else 0
                 rec["ma_structure"] = 1.0 if closes[-1] > ma20 > ma60 else 0.0
             else:
                 rec["ma_structure"] = None
 
-            # ADV20 (average daily volume, 20 days)
+            # ADV20
             recent_vols = volumes[-20:] if len(volumes) >= 20 else volumes
             rec["adv20_amount_cny"] = sum(recent_vols) / len(recent_vols) if recent_vols else None
 
-            # Turnover support: recent 5d avg vol / 20d avg vol
+            # Turnover support
             if len(volumes) >= 20:
                 avg5 = sum(volumes[-5:]) / 5
                 avg20 = sum(volumes[-20:]) / 20
@@ -278,11 +299,17 @@ def _fetch_historical_market_data(
             else:
                 rec["turnover_support"] = None
 
-        except Exception as e:
-            logger.debug(f"  {ticker} market data error: {e}")
+            return rec
+        except Exception:
             return _empty_market_record(ticker)
 
-        return rec
+    def _worker(ticker: str) -> dict:
+        df = _fetch_raw_bars(ticker)
+        return _compute_indicators(ticker, df)
+
+    # Check how many are already cached
+    cached = sum(1 for t in tickers if (cache_dir / f"{t}.parquet").exists())
+    logger.info(f"  Daily bar cache: {cached}/{len(tickers)} hits in {cache_dir}")
 
     records = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:

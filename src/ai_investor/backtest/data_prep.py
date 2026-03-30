@@ -96,7 +96,9 @@ def fetch_forward_returns(
     Entry price = T+1 close (per as-of convention).
     Forward return = (close at T+1+window / close at T+1) - 1.
 
-    Caches result to data/backtest/{trade_date}/forward_returns.parquet.
+    Per-ticker raw bars cached to data/cache/daily_hfq/{start}_{end}/
+    Slice-level result cached to data/backtest/{trade_date}/forward_returns.parquet.
+    Slice cache invalidates if ticker count differs.
 
     Args:
         tickers: List of stock codes.
@@ -109,61 +111,86 @@ def fetch_forward_returns(
     """
     cache = _cache_path(asof, "forward_returns")
     if cache.exists():
-        logger.info(f"Forward returns cache hit: {cache}")
-        return pl.read_parquet(cache)
+        cached_df = pl.read_parquet(cache)
+        if cached_df.height >= len(tickers):
+            logger.info(f"Forward returns cache hit: {cache} ({cached_df.height} tickers)")
+            return cached_df
+        else:
+            logger.info(
+                f"Forward returns cache stale: {cached_df.height} cached vs "
+                f"{len(tickers)} requested. Re-fetching..."
+            )
 
     if windows is None:
         windows = HORIZON_WINDOWS
 
+    import pandas as pd
     import akshare as ak
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from tqdm import tqdm
     from ai_investor.connectors.akshare_connector import _throttled_call
 
-    # We need data from entry_date to entry_date + max(windows) trading days
+    # Date range for raw bars
     max_window = max(windows.values())
-    # Add buffer for calendar day estimation
     start_str = (asof.entry_date - datetime.timedelta(days=5)).strftime("%Y%m%d")
     try:
         end_date = get_trade_date_offset(asof.entry_date, max_window + 5)
         end_str = end_date.strftime("%Y%m%d")
     except ValueError:
-        # If offset is beyond calendar, use a generous estimate
         end_str = (asof.entry_date + datetime.timedelta(days=max_window * 2)).strftime("%Y%m%d")
 
     entry_str = asof.entry_date.isoformat()
 
-    def _worker(ticker: str) -> dict:
-        """Fetch hfq daily data and compute forward returns."""
-        rec: dict = {"ticker": ticker}
+    # Per-ticker raw bar cache (hfq)
+    bar_cache_dir = Path(f"data/cache/daily_hfq/{start_str}_{end_str}")
+    bar_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    cached_count = sum(1 for t in tickers if (bar_cache_dir / f"{t}.parquet").exists())
+    logger.info(f"  Forward bar cache: {cached_count}/{len(tickers)} hits in {bar_cache_dir}")
+
+    def _fetch_raw(ticker: str) -> pd.DataFrame | None:
+        """Fetch hfq raw bars with per-ticker disk cache."""
+        cp = bar_cache_dir / f"{ticker}.parquet"
+        if cp.exists():
+            try:
+                return pd.read_parquet(cp)
+            except Exception:
+                pass
         try:
             df = _throttled_call(
                 ak.stock_zh_a_hist,
-                symbol=ticker,
-                period="daily",
-                start_date=start_str,
-                end_date=end_str,
+                symbol=ticker, period="daily",
+                start_date=start_str, end_date=end_str,
                 adjust="hfq",
             )
+            if df is not None and not df.empty:
+                try:
+                    df.to_parquet(cp, index=False)
+                except Exception:
+                    pass
+                return df
+        except Exception:
+            pass
+        return None
 
-            if df is None or df.empty:
-                for label in windows:
-                    rec[f"fwd_{label}"] = None
-                rec["_status"] = "no_data"
-                return rec
+    def _compute_fwd(ticker: str, df: pd.DataFrame | None) -> dict:
+        rec: dict = {"ticker": ticker}
+        if df is None or df.empty:
+            for label in windows:
+                rec[f"fwd_{label}"] = None
+            rec["_status"] = "no_data"
+            return rec
 
-            # Normalize date column
+        try:
             date_col = "日期" if "日期" in df.columns else df.columns[0]
             close_col = "收盘" if "收盘" in df.columns else "close"
             df[date_col] = df[date_col].astype(str)
 
-            # Find entry_date row (T+1 close)
             entry_rows = df[df[date_col] == entry_str]
             if entry_rows.empty:
-                # Try nearby dates
                 for delta in [1, -1, 2, -2]:
-                    alt_date = (asof.entry_date + datetime.timedelta(days=delta)).isoformat()
-                    entry_rows = df[df[date_col] == alt_date]
+                    alt = (asof.entry_date + datetime.timedelta(days=delta)).isoformat()
+                    entry_rows = df[df[date_col] == alt]
                     if not entry_rows.empty:
                         break
 
@@ -180,8 +207,6 @@ def fetch_forward_returns(
                 rec["_status"] = "zero_entry_price"
                 return rec
 
-            # Compute forward returns at each window
-            # We need to count trading days from entry
             entry_idx = entry_rows.index[0]
             df_from_entry = df.loc[entry_idx:]
 
@@ -190,20 +215,23 @@ def fetch_forward_returns(
                     exit_price = float(df_from_entry.iloc[n_days][close_col])
                     rec[f"fwd_{label}"] = round((exit_price / entry_price) - 1, 6)
                 else:
-                    rec[f"fwd_{label}"] = None  # Not enough data (window not mature)
+                    rec[f"fwd_{label}"] = None
 
             rec["_entry_price"] = entry_price
             rec["_status"] = "ok"
 
         except Exception as e:
-            logger.warning(f"  {ticker}: forward return fetch failed: {e}")
+            logger.warning(f"  {ticker}: forward return compute failed: {e}")
             for label in windows:
                 rec[f"fwd_{label}"] = None
             rec["_status"] = f"error:{type(e).__name__}"
 
         return rec
 
-    # Execute concurrently
+    def _worker(ticker: str) -> dict:
+        df = _fetch_raw(ticker)
+        return _compute_fwd(ticker, df)
+
     logger.info(
         f"Fetching forward returns for {len(tickers)} tickers "
         f"(entry={asof.entry_date}, windows={list(windows.keys())})"
@@ -226,7 +254,7 @@ def fetch_forward_returns(
             f"({100 * non_null / df_result.height:.0f}%)"
         )
 
-    # Cache
+    # Cache slice-level
     df_result.write_parquet(cache)
     logger.info(f"Forward returns cached to {cache}")
 
