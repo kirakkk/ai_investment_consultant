@@ -65,6 +65,10 @@ def build_pit_snapshot(
     tickers = pit_view["ticker"].to_list()
     logger.info(f"  PIT view: {len(tickers)} tickers with visible financials")
 
+    # --- Step 1b: Compute 3-year CAGRs from multi-year PIT data ---
+    logger.info("Step 1b: Computing 3-year CAGRs from historical financials...")
+    cagr_data = _compute_cagr(tickers, trade_date, pit_events)
+
     # --- Step 2: Historical daily market data ---
     logger.info("Step 2: Fetching historical daily market data...")
     market_data = _fetch_historical_market_data(tickers, trade_date, max_workers)
@@ -79,10 +83,111 @@ def build_pit_snapshot(
 
     # --- Step 5: Join everything ---
     logger.info("Step 5: Assembling snapshot...")
-    snapshot = _assemble_snapshot(pit_view, market_data, metadata, risk_flags, trade_date)
+    snapshot = _assemble_snapshot(
+        pit_view, market_data, metadata, risk_flags, trade_date,
+        cagr_data=cagr_data,
+    )
 
     logger.info(f"PIT Snapshot complete: {snapshot.height} rows × {snapshot.width} cols")
     return snapshot
+
+
+# ---------------------------------------------------------------------------
+# CAGR computation from multi-year events
+# ---------------------------------------------------------------------------
+
+def _compute_cagr(
+    tickers: list[str],
+    decision_date: datetime.date,
+    pit_events: pl.DataFrame | None,
+) -> pl.DataFrame:
+    """Compute 3-year revenue and profit CAGRs from PIT events.
+
+    For each ticker, find the latest annual formal report visible at
+    decision_date, and compare with the formal report 3 years earlier.
+
+    CAGR = (latest / base) ^ (1/3) - 1
+    """
+    if pit_events is None or pit_events.height == 0:
+        return pl.DataFrame({
+            "ticker": tickers,
+            "revenue_cagr_3y": [None] * len(tickers),
+            "profit_cagr_3y": [None] * len(tickers),
+        })
+
+    decision_str = decision_date.isoformat()
+
+    # Filter to formal annuals visible at decision_date
+    annuals = pit_events.filter(
+        (pl.col("source_type") == "formal") &
+        (pl.col("available_at") <= decision_str) &
+        (pl.col("report_period").str.ends_with("-12-31"))
+    )
+
+    if annuals.height == 0:
+        return pl.DataFrame({
+            "ticker": tickers,
+            "revenue_cagr_3y": [None] * len(tickers),
+            "profit_cagr_3y": [None] * len(tickers),
+        })
+
+    records = []
+    for ticker in tickers:
+        t_data = annuals.filter(pl.col("ticker") == ticker).sort("report_period", descending=True)
+        if t_data.height < 2:
+            records.append({"ticker": ticker, "revenue_cagr_3y": None, "profit_cagr_3y": None})
+            continue
+
+        latest = t_data.row(0, named=True)
+        latest_rp = latest["report_period"][:4]  # year
+
+        # Find base year (3 years before latest)
+        base_year = str(int(latest_rp) - 3)
+        base_rows = t_data.filter(pl.col("report_period").str.starts_with(base_year))
+
+        if base_rows.height == 0:
+            records.append({"ticker": ticker, "revenue_cagr_3y": None, "profit_cagr_3y": None})
+            continue
+
+        base = base_rows.row(0, named=True)
+
+        # Revenue CAGR
+        rev_latest = _to_float(latest.get("revenue"))
+        rev_base = _to_float(base.get("revenue"))
+        rev_cagr = _cagr(rev_base, rev_latest, 3)
+
+        # Profit CAGR
+        prof_latest = _to_float(latest.get("net_profit"))
+        prof_base = _to_float(base.get("net_profit"))
+        prof_cagr = _cagr(prof_base, prof_latest, 3)
+
+        records.append({
+            "ticker": ticker,
+            "revenue_cagr_3y": rev_cagr,
+            "profit_cagr_3y": prof_cagr,
+        })
+
+    return pl.DataFrame(records)
+
+
+def _to_float(val) -> float | None:
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        return f if f == f else None  # NaN check
+    except (ValueError, TypeError):
+        return None
+
+
+def _cagr(base: float | None, latest: float | None, years: int) -> float | None:
+    """Compute CAGR. Returns None if inputs are invalid."""
+    if base is None or latest is None or base <= 0 or latest <= 0:
+        return None
+    try:
+        return (latest / base) ** (1.0 / years) - 1.0
+    except (ZeroDivisionError, OverflowError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +403,8 @@ def _assemble_snapshot(
     metadata: pl.DataFrame,
     risk_flags: pl.DataFrame,
     trade_date: datetime.date,
+    *,
+    cagr_data: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Join all data sources into the 37-column snapshot format.
 
@@ -324,6 +431,12 @@ def _assemble_snapshot(
     # Join market data
     if market_data.height > 0:
         df = df.join(market_data, on="ticker", how="left")
+
+    # Join CAGR data
+    if cagr_data is not None and cagr_data.height > 0:
+        cagr_cols = [c for c in cagr_data.columns if c not in df.columns or c == "ticker"]
+        if len(cagr_cols) > 1:
+            df = df.join(cagr_data.select(cagr_cols), on="ticker", how="left")
 
     # Join metadata
     if metadata.height > 0:
