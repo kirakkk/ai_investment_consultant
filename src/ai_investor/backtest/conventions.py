@@ -95,6 +95,107 @@ def get_trade_date_offset(trade_date: datetime.date, offset: int) -> datetime.da
 
 
 # ---------------------------------------------------------------------------
+# PIT (Point-in-Time) temporal functions
+# ---------------------------------------------------------------------------
+
+def statutory_deadline(report_period: datetime.date) -> datetime.date:
+    """Return the legal disclosure deadline for a given report period.
+
+    A-share disclosure rules (SSE/SZSE):
+      Q1 (03-31) → April 30 of the same year
+      Q2 (06-30) → August 31 of the same year
+      Q3 (09-30) → October 31 of the same year
+      Annual (12-31) → April 30 of the NEXT year
+
+    Args:
+        report_period: The end date of the reporting period,
+                       e.g. datetime.date(2022, 12, 31) for 2022 annual.
+    """
+    month = report_period.month
+    year = report_period.year
+
+    if month == 3:       # Q1
+        return datetime.date(year, 4, 30)
+    elif month == 6:     # Q2 (mid-year report)
+        return datetime.date(year, 8, 31)
+    elif month == 9:     # Q3
+        return datetime.date(year, 10, 31)
+    elif month == 12:    # Annual
+        return datetime.date(year + 1, 4, 30)
+    else:
+        raise ValueError(
+            f"Invalid report_period month: {report_period}. "
+            f"Expected month in (3, 6, 9, 12)."
+        )
+
+
+def compute_available_at(
+    source_type: str,
+    report_period: datetime.date,
+    ann_date: datetime.date | None = None,
+) -> datetime.date:
+    """Compute the first trading day when financial data becomes market-visible.
+
+    Rules:
+      - forecast / express: use real ann_date + next trading day
+        (these are one-time events, their ann_date is trustworthy)
+      - formal: use statutory_deadline + next trading day
+        (because AKShare's "最新公告日期" mixes in later revisions)
+
+    Args:
+        source_type: One of "forecast", "express", "formal"
+        report_period: End date of the reporting period
+        ann_date: Actual announcement date (required for forecast/express)
+
+    Returns:
+        First trading day when this data can be used in a backtest.
+    """
+    if source_type in ("forecast", "express"):
+        if ann_date is None:
+            raise ValueError(
+                f"ann_date is required for source_type={source_type}"
+            )
+        return get_next_trade_date(resolve_trade_date(ann_date))
+
+    elif source_type == "formal":
+        deadline = statutory_deadline(report_period)
+        return get_next_trade_date(resolve_trade_date(deadline))
+
+    else:
+        raise ValueError(f"Unknown source_type: {source_type}")
+
+
+# ---------------------------------------------------------------------------
+# Report period enumeration
+# ---------------------------------------------------------------------------
+
+STANDARD_QUARTER_MONTHS = [3, 6, 9, 12]
+
+
+def enumerate_report_periods(
+    start_year: int = 2020,
+    end_date: datetime.date | None = None,
+) -> list[datetime.date]:
+    """Generate all standard quarterly report period end-dates.
+
+    Returns dates like 2020-03-31, 2020-06-30, ..., up to end_date.
+    """
+    import calendar
+
+    if end_date is None:
+        end_date = datetime.date.today()
+
+    periods: list[datetime.date] = []
+    for year in range(start_year, end_date.year + 1):
+        for month in STANDARD_QUARTER_MONTHS:
+            last_day = calendar.monthrange(year, month)[1]
+            d = datetime.date(year, month, last_day)
+            if d <= end_date:
+                periods.append(d)
+    return periods
+
+
+# ---------------------------------------------------------------------------
 # As-Of Context
 # ---------------------------------------------------------------------------
 
