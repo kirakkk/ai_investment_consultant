@@ -69,6 +69,10 @@ def build_pit_snapshot(
     logger.info("Step 1b: Computing 3-year CAGRs from historical financials...")
     cagr_data = _compute_cagr(tickers, trade_date, pit_events)
 
+    # --- Step 1c: Compute YoY acceleration (delta of growth rates) ---
+    logger.info("Step 1c: Computing YoY acceleration from consecutive annual reports...")
+    accel_data = _compute_yoy_acceleration(tickers, trade_date, pit_events)
+
     # --- Step 2: Historical daily market data ---
     logger.info("Step 2: Fetching historical daily market data...")
     market_data = _fetch_historical_market_data(tickers, trade_date, max_workers)
@@ -86,6 +90,7 @@ def build_pit_snapshot(
     snapshot = _assemble_snapshot(
         pit_view, market_data, metadata, risk_flags, trade_date,
         cagr_data=cagr_data,
+        accel_data=accel_data,
     )
 
     logger.info(f"PIT Snapshot complete: {snapshot.height} rows × {snapshot.width} cols")
@@ -168,6 +173,99 @@ def _compute_cagr(
         })
 
     return pl.DataFrame(records)
+
+
+def _compute_yoy_acceleration(
+    tickers: list[str],
+    decision_date: datetime.date,
+    pit_events: pl.DataFrame | None,
+) -> pl.DataFrame:
+    """Compute YoY growth acceleration from consecutive annual reports.
+
+    Acceleration = latest_yoy - prior_yoy (in percentage points)
+    Example: revenue grew +30% in 2022 vs +20% in 2021 → acceleration = +10pp
+
+    This measures whether growth is ACCELERATING (positive) or DECELERATING
+    (negative), which is the true signal for the growth_acceleration dimension.
+    """
+    empty = pl.DataFrame({
+        "ticker": tickers,
+        "revenue_yoy_acceleration": [None] * len(tickers),
+        "profit_yoy_acceleration": [None] * len(tickers),
+        "operating_margin_delta": [None] * len(tickers),
+        "cfo_to_net_profit_ttm": [None] * len(tickers),
+    })
+
+    if pit_events is None or pit_events.height == 0:
+        return empty
+
+    decision_str = decision_date.isoformat()
+
+    # Filter to formal annuals visible at decision_date
+    annuals = pit_events.filter(
+        (pl.col("source_type") == "formal") &
+        (pl.col("available_at") <= decision_str) &
+        (pl.col("report_period").str.ends_with("-12-31"))
+    )
+
+    if annuals.height == 0:
+        return empty
+
+    records = []
+    for ticker in tickers:
+        t_data = annuals.filter(pl.col("ticker") == ticker).sort("report_period", descending=True)
+
+        rec = {
+            "ticker": ticker,
+            "revenue_yoy_acceleration": None,
+            "profit_yoy_acceleration": None,
+            "operating_margin_delta": None,
+            "cfo_to_net_profit_ttm": None,
+        }
+
+        if t_data.height >= 1:
+            latest = t_data.row(0, named=True)
+
+            # CFO / Net Profit ratio (from latest report)
+            cfo = _to_float(latest.get("cfo_per_share"))
+            eps = _to_float(latest.get("eps"))
+            if cfo is not None and eps is not None and eps != 0:
+                rec["cfo_to_net_profit_ttm"] = cfo / eps
+
+        if t_data.height >= 2:
+            latest = t_data.row(0, named=True)
+            prior = t_data.row(1, named=True)
+
+            # Revenue YoY acceleration
+            rev_yoy_latest = _to_float(latest.get("revenue_yoy"))
+            rev_yoy_prior = _to_float(prior.get("revenue_yoy"))
+            if rev_yoy_latest is not None and rev_yoy_prior is not None:
+                rec["revenue_yoy_acceleration"] = rev_yoy_latest - rev_yoy_prior
+
+            # Profit YoY acceleration
+            prof_yoy_latest = _to_float(latest.get("profit_yoy"))
+            prof_yoy_prior = _to_float(prior.get("profit_yoy"))
+            if prof_yoy_latest is not None and prof_yoy_prior is not None:
+                rec["profit_yoy_acceleration"] = prof_yoy_latest - prof_yoy_prior
+
+            # Operating margin delta (gross_margin change)
+            gm_latest = _to_float(latest.get("gross_margin"))
+            gm_prior = _to_float(prior.get("gross_margin"))
+            if gm_latest is not None and gm_prior is not None:
+                rec["operating_margin_delta"] = gm_latest - gm_prior
+
+        records.append(rec)
+
+    result = pl.DataFrame(records)
+    nn_rev = result.height - result["revenue_yoy_acceleration"].null_count()
+    nn_prof = result.height - result["profit_yoy_acceleration"].null_count()
+    nn_cfo = result.height - result["cfo_to_net_profit_ttm"].null_count()
+    logger.info(
+        f"  YoY acceleration: rev={nn_rev}/{result.height} ({100*nn_rev/result.height:.0f}%), "
+        f"profit={nn_prof}/{result.height} ({100*nn_prof/result.height:.0f}%), "
+        f"cfo_ratio={nn_cfo}/{result.height} ({100*nn_cfo/result.height:.0f}%)"
+    )
+    return result
 
 
 def _to_float(val) -> float | None:
@@ -432,12 +530,14 @@ def _assemble_snapshot(
     trade_date: datetime.date,
     *,
     cagr_data: pl.DataFrame | None = None,
+    accel_data: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
-    """Join all data sources into the 37-column snapshot format.
+    """Join all data sources into the 45-column snapshot format.
 
     Reconstructs valuation metrics (PE, PB) from:
     - PIT financial data (EPS, BPS from latest visible report)
     - Historical market data (close price at trade_date)
+    - Acceleration data (YoY deltas from consecutive annual reports)
     """
     from ai_investor.connectors.snapshot_builder import REQUIRED_COLUMNS
 
@@ -465,6 +565,12 @@ def _assemble_snapshot(
         if len(cagr_cols) > 1:
             df = df.join(cagr_data.select(cagr_cols), on="ticker", how="left")
 
+    # Join acceleration data (true YoY deltas + cfo_ratio + margin_delta)
+    if accel_data is not None and accel_data.height > 0:
+        accel_cols = [c for c in accel_data.columns if c not in df.columns or c == "ticker"]
+        if len(accel_cols) > 1:
+            df = df.join(accel_data.select(accel_cols), on="ticker", how="left")
+
     # Join metadata
     if metadata.height > 0:
         meta_cols = [c for c in metadata.columns if c not in df.columns or c == "ticker"]
@@ -491,12 +597,11 @@ def _assemble_snapshot(
         )
 
     # Map PIT fields to expected column names
+    # Note: revenue_yoy_acceleration/profit_yoy_acceleration/cfo_to_net_profit_ttm
+    # are now computed properly in _compute_yoy_acceleration(), not renamed.
     rename_map = {
         "roe": "roe_ttm",
-        "gross_margin": "gross_margin_stability_12q",  # approximate
-        "revenue_yoy": "revenue_yoy_acceleration",
-        "profit_yoy": "profit_yoy_acceleration",
-        "cfo_per_share": "cfo_to_net_profit_ttm",  # approximate
+        "gross_margin": "gross_margin_stability_12q",
         "industry": "industry_l1",
     }
 

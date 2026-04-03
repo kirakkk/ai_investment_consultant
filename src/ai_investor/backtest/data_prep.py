@@ -243,7 +243,15 @@ def fetch_forward_returns(
                           desc="Forward Returns"):
             records.append(future.result())
 
-    df_result = pl.DataFrame(records)
+    # Build schema explicitly to avoid Polars infer_schema_length issues
+    # when early records are all-None and later records contain floats.
+    schema: dict[str, pl.DataType] = {"ticker": pl.Utf8}
+    for label in windows:
+        schema[f"fwd_{label}"] = pl.Float64
+    schema["_entry_price"] = pl.Float64
+    schema["_status"] = pl.Utf8
+
+    df_result = pl.DataFrame(records, schema=schema, infer_schema_length=None)
 
     # Log coverage
     for label in windows:
@@ -254,8 +262,12 @@ def fetch_forward_returns(
             f"({100 * non_null / df_result.height:.0f}%)"
         )
 
+    # Drop internal columns before caching
+    drop_cols = [c for c in df_result.columns if c.startswith("_")]
+    df_export = df_result.drop(drop_cols)
+
     # Cache slice-level
-    df_result.write_parquet(cache)
+    df_export.write_parquet(cache)
     logger.info(f"Forward returns cached to {cache}")
 
     return df_result
